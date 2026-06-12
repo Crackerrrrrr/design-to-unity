@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lanhu-unity-handoff-mcp"
+version = "0.1.0"
+description = "MCP server that turns Lanhu design pages into Unity-ready design handoff packets."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastmcp>=2.0.0",
+  "httpx>=0.27.0",
+  "python-dotenv>=1.0.0"
+]
+
+[project.scripts]
+lanhu-unity-handoff-mcp = "design_handoff_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
