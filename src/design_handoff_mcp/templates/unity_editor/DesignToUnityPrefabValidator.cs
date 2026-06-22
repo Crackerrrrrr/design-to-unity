@@ -272,6 +272,8 @@ public static class DesignToUnityPrefabValidator
         report.ActualComponents["VerticalLayoutGroup"] = prefab.GetComponentsInChildren<VerticalLayoutGroup>(true).Length;
         report.ActualComponents["HorizontalLayoutGroup"] = prefab.GetComponentsInChildren<HorizontalLayoutGroup>(true).Length;
         report.ActualComponents["GridLayoutGroup"] = prefab.GetComponentsInChildren<GridLayoutGroup>(true).Length;
+        report.ActualComponents["Outline"] = prefab.GetComponentsInChildren<Outline>(true).Length;
+        report.ActualComponents["Shadow"] = prefab.GetComponentsInChildren<Shadow>(true).Length;
         report.ActualComponents["CanvasGroup"] = prefab.GetComponentsInChildren<CanvasGroup>(true).Length;
     }
 

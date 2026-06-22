@@ -10,9 +10,11 @@ from .unity_yaml_writer import (
     GRID_LAYOUT_GROUP_SCRIPT_GUID,
     HORIZONTAL_LAYOUT_GROUP_SCRIPT_GUID,
     IMAGE_SCRIPT_GUID,
+    OUTLINE_SCRIPT_GUID,
     RECT_MASK_2D_SCRIPT_GUID,
     SCROLLBAR_SCRIPT_GUID,
     SCROLL_RECT_SCRIPT_GUID,
+    SHADOW_SCRIPT_GUID,
     SLIDER_SCRIPT_GUID,
     TMP_DROPDOWN_SCRIPT_GUID,
     TMP_INPUT_FIELD_SCRIPT_GUID,
@@ -158,6 +160,8 @@ def _source_counts(source_map: dict[str, Any], errors: list[dict[str, Any]], war
         "vertical_layout_group_node_count": int(stats.get("vertical_layout_group_node_count") or 0),
         "horizontal_layout_group_node_count": int(stats.get("horizontal_layout_group_node_count") or 0),
         "grid_layout_group_node_count": int(stats.get("grid_layout_group_node_count") or 0),
+        "outline_node_count": int(stats.get("outline_node_count") or 0),
+        "shadow_node_count": int(stats.get("shadow_node_count") or 0),
         "canvas_group_node_count": int(stats.get("canvas_group_node_count") or 0),
     }
     if counts["node_count"] != len(nodes):
@@ -189,6 +193,8 @@ def _yaml_counts(prefab_text: str) -> dict[str, int]:
         "vertical_layout_group_node_count": prefab_text.count(f"guid: {VERTICAL_LAYOUT_GROUP_SCRIPT_GUID}"),
         "horizontal_layout_group_node_count": prefab_text.count(f"guid: {HORIZONTAL_LAYOUT_GROUP_SCRIPT_GUID}"),
         "grid_layout_group_node_count": prefab_text.count(f"guid: {GRID_LAYOUT_GROUP_SCRIPT_GUID}"),
+        "outline_node_count": prefab_text.count(f"guid: {OUTLINE_SCRIPT_GUID}"),
+        "shadow_node_count": prefab_text.count(f"guid: {SHADOW_SCRIPT_GUID}"),
         "canvas_group_node_count": len(re.findall(r"^--- !u!225 &", prefab_text, re.MULTILINE)),
     }
 
@@ -211,6 +217,8 @@ def _compare_counts(source_counts: dict[str, int], yaml_counts: dict[str, int], 
         ("vertical_layout_group_node_count", "vertical_layout_group_node_count"),
         ("horizontal_layout_group_node_count", "horizontal_layout_group_node_count"),
         ("grid_layout_group_node_count", "grid_layout_group_node_count"),
+        ("outline_node_count", "outline_node_count"),
+        ("shadow_node_count", "shadow_node_count"),
         ("canvas_group_node_count", "canvas_group_node_count"),
     ]
     for source_key, yaml_key in comparisons:
@@ -258,6 +266,8 @@ def _verify_import_manifest(
         "VerticalLayoutGroup": "vertical_layout_group_node_count",
         "HorizontalLayoutGroup": "horizontal_layout_group_node_count",
         "GridLayoutGroup": "grid_layout_group_node_count",
+        "Outline": "outline_node_count",
+        "Shadow": "shadow_node_count",
         "CanvasGroup": "canvas_group_node_count",
     }
     for component_name, yaml_key in mapping.items():

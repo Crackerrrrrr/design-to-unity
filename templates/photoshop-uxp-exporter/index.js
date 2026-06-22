@@ -304,29 +304,256 @@ function textInfo(layer, descriptor) {
     return null;
   }
 
-  try {
-    if (layer.textItem) {
-      return {
-        content: String(layer.textItem.contents || ""),
-        fontFamily: stringValue(layer.textItem.font),
-        fontSize: safeNumber(layer.textItem.size || layer.textItem.fontSize, 24),
-        color: colorToRgba(layer.textItem.color),
-        align: stringValue(layer.textItem.justification || layer.textItem.alignment),
-      };
-    }
-  } catch (error) {
-    // Fall through to batchPlay textKey extraction.
-  }
-
   const textKey = descriptor.textKey || {};
-  const content = textKey.textKey || descriptor.text || descriptor.contents;
+  const layerTextItem = safeTextItem(layer);
+  const content = textContent(layerTextItem, textKey, descriptor);
   if (content == null) {
     return null;
   }
-  return {
+
+  const descriptorStyle = textStyleFromDescriptor(textKey);
+  const layerStyle = textStyleFromTextItem(layerTextItem);
+  const style = {
     content: String(content),
-    fontSize: 24,
+    ...descriptorStyle,
+    ...layerStyle,
   };
+  const ranges = textStyleRanges(textKey, String(content));
+  if (ranges.length) {
+    style.spans = ranges;
+  }
+  const effects = textEffects(descriptor);
+  if (effects.stroke) {
+    style.stroke = effects.stroke;
+  }
+  if (effects.dropShadow) {
+    style.dropShadow = effects.dropShadow;
+  }
+  return removeEmpty(style);
+}
+
+function safeTextItem(layer) {
+  try {
+    return layer.textItem || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function textContent(textItem, textKey, descriptor) {
+  if (textItem && textItem.contents != null) {
+    return textItem.contents;
+  }
+  return textKey.textKey || descriptor.text || descriptor.contents;
+}
+
+function textStyleFromTextItem(textItem) {
+  if (!textItem) {
+    return {};
+  }
+  return removeEmpty({
+    fontFamily: stringValue(textItem.font),
+    fontSize: safeNumber(textItem.size ?? textItem.fontSize, null),
+    color: colorToRgba(textItem.color),
+    align: stringValue(textItem.justification || textItem.alignment),
+  });
+}
+
+function textStyleFromDescriptor(textKey) {
+  const firstRange = firstTextStyleRange(textKey);
+  const style = firstRange.textStyle || textKey.textStyle || textKey.defaultStyle || {};
+  const paragraph = firstParagraphStyleRange(textKey).paragraphStyle || textKey.paragraphStyle || {};
+  return textStyleObject(style, paragraph);
+}
+
+function textStyleRanges(textKey, content) {
+  const ranges = Array.isArray(textKey.textStyleRange)
+    ? textKey.textStyleRange
+    : Array.isArray(textKey.styleRanges)
+      ? textKey.styleRanges
+      : [];
+  const result = [];
+  for (const range of ranges) {
+    if (!range || typeof range !== "object") {
+      continue;
+    }
+    const start = Math.max(0, Math.floor(safeNumber(range.from ?? range.start, 0)));
+    const end = Math.max(start, Math.floor(safeNumber(range.to ?? range.end, start)));
+    if (end <= start || start >= content.length) {
+      continue;
+    }
+    const paragraph = paragraphForTextRange(textKey, start, end);
+    const style = textStyleObject(range.textStyle || range.style || range, paragraph);
+    result.push(
+      removeEmpty({
+        start,
+        length: Math.min(content.length, end) - start,
+        style,
+      })
+    );
+  }
+  return result;
+}
+
+function firstTextStyleRange(textKey) {
+  const ranges = Array.isArray(textKey.textStyleRange) ? textKey.textStyleRange : [];
+  return ranges.length ? ranges[0] : {};
+}
+
+function firstParagraphStyleRange(textKey) {
+  const ranges = Array.isArray(textKey.paragraphStyleRange) ? textKey.paragraphStyleRange : [];
+  return ranges.length ? ranges[0] : {};
+}
+
+function paragraphForTextRange(textKey, start, end) {
+  const ranges = Array.isArray(textKey.paragraphStyleRange) ? textKey.paragraphStyleRange : [];
+  for (const range of ranges) {
+    const rangeStart = Math.floor(safeNumber(range.from ?? range.start, 0));
+    const rangeEnd = Math.floor(safeNumber(range.to ?? range.end, rangeStart));
+    if (rangeEnd > start && rangeStart < end) {
+      return range.paragraphStyle || range.style || {};
+    }
+  }
+  return {};
+}
+
+function textStyleObject(style, paragraph) {
+  if (!style || typeof style !== "object") {
+    return {};
+  }
+  return removeEmpty({
+    fontFamily: stringValue(style.fontPostScriptName || style.fontName || style.font || style.fontFamily),
+    fontStyle: stringValue(style.fontStyleName || style.styleName || style.fontStyle),
+    fontWeight: numericOrString(style.fontWeight || style.weight),
+    fontSize: unitNumber(style.size ?? style.fontSize, null),
+    lineHeight: unitNumber(style.leading ?? style.lineHeight, null),
+    letterSpacing: trackingToCharacterSpacing(style.tracking ?? style.letterSpacing),
+    color: colorToRgba(style.color || style.fillColor || style.textStyleColor),
+    align: stringValue(paragraph.align || paragraph.alignment || style.justification || style.align),
+    underline: boolValue(style.underline),
+    italic: boolValue(style.fauxItalic || style.italic),
+  });
+}
+
+function textEffects(descriptor) {
+  const effects = descriptor.layerEffects || descriptor.effects || {};
+  const stroke = effectObject(effects.frameFX || effects.stroke || effects.outline, "stroke");
+  const dropShadow = effectObject(effects.dropShadow || effects.dropShadowMulti || effects.shadow, "shadow");
+  return removeEmpty({ stroke, dropShadow });
+}
+
+function effectObject(effect, kind) {
+  if (!effect || typeof effect !== "object") {
+    return null;
+  }
+  if (Array.isArray(effect)) {
+    return effectObject(effect.find((item) => item && boolValue(item.enabled) !== false), kind);
+  }
+  if (effect.enabled === false) {
+    return null;
+  }
+  const opacity = unitNumber(effect.opacity, 100);
+  const color = colorWithOpacity(effect.color || effect.fillColor, opacity);
+  if (kind === "stroke") {
+    return removeEmpty({
+      enabled: true,
+      width: unitNumber(effect.size ?? effect.width, 1),
+      color,
+      use_graphic_alpha: true,
+    });
+  }
+  const offset = shadowOffset(effect);
+  return removeEmpty({
+    enabled: true,
+    color: color || "rgba(0,0,0,0.5)",
+    offset,
+    use_graphic_alpha: true,
+  });
+}
+
+function shadowOffset(effect) {
+  if (effect.offset && typeof effect.offset === "object") {
+    return {
+      x: unitNumber(effect.offset.x, 1),
+      y: unitNumber(effect.offset.y, -1),
+    };
+  }
+  if (effect.x != null || effect.y != null) {
+    return {
+      x: unitNumber(effect.x, 1),
+      y: unitNumber(effect.y, -1),
+    };
+  }
+  const distance = unitNumber(effect.distance, 1);
+  const angle = (unitNumber(effect.localLightingAngle || effect.angle, 135) * Math.PI) / 180;
+  return {
+    x: round(Math.cos(angle) * distance),
+    y: round(-Math.sin(angle) * distance),
+  };
+}
+
+function unitNumber(value, fallback) {
+  if (value == null) {
+    return fallback;
+  }
+  if (typeof value === "number") {
+    return round(value);
+  }
+  if (typeof value === "object") {
+    if (typeof value._value === "number") {
+      return round(value._value);
+    }
+    if (typeof value.value === "number") {
+      return round(value.value);
+    }
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? round(number) : fallback;
+}
+
+function trackingToCharacterSpacing(value) {
+  const number = unitNumber(value, null);
+  if (number == null) {
+    return null;
+  }
+  return round(number / 10);
+}
+
+function numericOrString(value) {
+  if (value == null) {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : stringValue(value);
+}
+
+function colorWithOpacity(color, opacityPercent) {
+  const rgba = colorToRgba(color);
+  if (!rgba || opacityPercent == null || opacityPercent >= 99.99) {
+    return rgba;
+  }
+  return rgba.replace(/,\s*[^,]+\)$/, `,${round(Math.max(0, Math.min(100, opacityPercent)) / 100)})`);
+}
+
+function removeEmpty(value) {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const result = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry == null || entry === "" || (Array.isArray(entry) && !entry.length)) {
+      continue;
+    }
+    if (typeof entry === "object" && !Array.isArray(entry)) {
+      const nested = removeEmpty(entry);
+      if (nested && Object.keys(nested).length) {
+        result[key] = nested;
+      }
+      continue;
+    }
+    result[key] = entry;
+  }
+  return result;
 }
 
 function roleFromName(name) {
@@ -504,6 +731,14 @@ function colorToRgba(color) {
     if (color.rgb) {
       const rgb = color.rgb;
       return `rgba(${Math.round(rgb.red)},${Math.round(rgb.green)},${Math.round(rgb.blue)},1)`;
+    }
+    const red = unitNumber(color.red ?? color.r ?? color.Rd, null);
+    const green = unitNumber(color.green ?? color.grain ?? color.g ?? color.Grn, null);
+    const blue = unitNumber(color.blue ?? color.b ?? color.Bl, null);
+    if (red != null && green != null && blue != null) {
+      const alpha = unitNumber(color.alpha ?? color.opacity, 1);
+      const normalizedAlpha = alpha > 1 ? alpha / 100 : alpha;
+      return `rgba(${Math.round(red)},${Math.round(green)},${Math.round(blue)},${round(Math.max(0, Math.min(1, normalizedAlpha)))})`;
     }
   } catch (error) {
     return null;

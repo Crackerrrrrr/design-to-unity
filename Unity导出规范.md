@@ -57,7 +57,7 @@ Unity MCP 负责执行：
 允许范围：
 
 - 目标是静态 UGUI prefab 快照，不是完整场景、不含业务脚本绑定。
-- 生成 `GameObject`、`RectTransform`、`CanvasRenderer`、`UnityEngine.UI.Image`、`TextMeshProUGUI`、`Button`、`Slider`、`Toggle`、`ToggleGroup`、`TMP_InputField`、`TMP_Dropdown`、`ScrollRect`、`Scrollbar`、`RectMask2D`、`VerticalLayoutGroup`、`HorizontalLayoutGroup`、`GridLayoutGroup` 和 `CanvasGroup` 的 YAML。
+- 生成 `GameObject`、`RectTransform`、`CanvasRenderer`、`UnityEngine.UI.Image`、`TextMeshProUGUI`、`UnityEngine.UI.Outline`、`UnityEngine.UI.Shadow`、`Button`、`Slider`、`Toggle`、`ToggleGroup`、`TMP_InputField`、`TMP_Dropdown`、`ScrollRect`、`Scrollbar`、`RectMask2D`、`VerticalLayoutGroup`、`HorizontalLayoutGroup`、`GridLayoutGroup` 和 `CanvasGroup` 的 YAML。
 - 文本节点默认生成可编辑的 `TextMeshProUGUI`；如果需要绝对视觉一致，可在工具参数中关闭文本组件并回退到文字切图。
 - `button_candidate` 默认添加 `Button`，并打开目标 Graphic 的 raycast。
 - `progress_candidate` / `slider_candidate` 默认添加 `Slider`；能够推断子图层角色时写入 `fillRect` / `handleRect`，否则留空并输出 review hint。
@@ -550,7 +550,34 @@ Design to Unity 应明确：
     "line_height": 38,
     "letter_spacing": 0,
     "overflow": "clip",
-    "wrap": false
+    "wrap": false,
+    "spans": [
+      {
+        "start": 0,
+        "length": 2,
+        "font_size": 34,
+        "font_style": "Bold",
+        "color": "#FFE680"
+      }
+    ],
+    "effects": {
+      "outline": {
+        "width": 2,
+        "color": "#3A1600"
+      },
+      "shadow": {
+        "color": "rgba(0,0,0,0.65)",
+        "offset": { "x": 2, "y": -3 }
+      }
+    },
+    "font_hint": {
+      "source_font_family": "PingFangSC-Semibold",
+      "source_font_style": "Semibold",
+      "source_font_weight": 600,
+      "font_asset_lookup_key": "pingfangscsemibold",
+      "tmp_font_asset_guid": null,
+      "fallback_policy": "use_project_default_tmp_font"
+    }
   }
 }
 ```
@@ -558,10 +585,16 @@ Design to Unity 应明确：
 ### 9.2 TMP 映射
 
 ```text
-content -> TMP.text
+content -> TMP.text / TMP rich text
 font_size -> TMP.fontSize
 color -> TMP.color
 align -> TMP.alignment
+font_style / font_weight -> TMP.fontStyle and TMP.fontWeight when possible
+line_height -> TMP.lineSpacing
+letter_spacing -> TMP.characterSpacing
+spans -> TMP rich text tags: <color>, <size>, <b>, <i>, <u>
+effects.outline -> UnityEngine.UI.Outline
+effects.shadow -> UnityEngine.UI.Shadow
 wrap=false -> TMP.enableWordWrapping=false
 wrap=true -> TMP.enableWordWrapping=true
 overflow=clip -> TMP.overflowMode=Masking or Truncate
@@ -569,30 +602,56 @@ enableAutoSizing=false
 raycastTarget=false
 ```
 
+Direct prefab YAML 当前按以下规则落地：
+
+- 文本默认生成 `TextMeshProUGUI`，`m_isRichText=1`。
+- 如果 `spans` 存在，按 `start + length` 切分文本并写入 TMP rich text tags。
+- `font_style` / `font_weight` 会写入 `m_fontStyle` 和 `m_fontWeight`，可表达 Bold / Italic / Underline。
+- `line_height` 会转换为 TMP 百分比行距，`letter_spacing` 写入 character spacing。
+- `effects.outline` 会给同一 GameObject 增加 `UnityEngine.UI.Outline`，宽度映射到 `effectDistance = (width, -width)`。
+- `effects.shadow` 会给同一 GameObject 增加 `UnityEngine.UI.Shadow`，offset 直接映射到 `effectDistance`。
+- Photoshop blur、spread、bevel、多重阴影、多重描边、字形 OpenType 特性无法由默认 UGUI 完整表达，必须保留 warning 并用 `preview.png` 做 visual diff。
+
 ### 9.3 字体映射
 
-Design to Unity 不直接提供 Unity TMP FontAsset，但应提供字体候选：
+Design to Unity 不强行猜测项目字体，但必须提供可检索的字体候选：
 
 ```json
 {
   "font_hint": {
     "source_font_family": "PingFangSC-Semibold",
-    "weight": 600,
-    "unity_preferred_font_asset": null,
+    "source_font_style": "Semibold",
+    "source_font_weight": 600,
+    "font_asset_lookup_key": "pingfangscsemibold",
+    "tmp_font_asset_guid": null,
     "fallback_policy": "use_project_default_tmp_font"
   }
 }
 ```
 
-如果用户项目提供字体映射表，后续可以扩展：
+Direct prefab YAML writer 支持两种字体输入：
+
+- 单个默认字体：`tmp_font_asset_guid`。
+- 多字体映射：`tmp_font_asset_map_json`，key 可以是 Photoshop 字体名、字体名 + style、字体名 + weight。
 
 ```json
 {
-  "font_map": {
-    "PingFangSC-Regular": "Assets/Fonts/PingFang-Regular SDF.asset",
-    "PingFangSC-Semibold": "Assets/Fonts/PingFang-Semibold SDF.asset"
+  "tmp_font_asset_map": {
+    "PingFangSC-Regular": "11111111111111111111111111111111",
+    "PingFangSC-Semibold": "22222222222222222222222222222222",
+    "Inter Bold Italic": "33333333333333333333333333333333"
   }
 }
+```
+
+优先级：
+
+```text
+text.tmp_font_asset_guid / text.font_hint.tmp_font_asset_guid
+  -> tmp_font_asset_map_json 命中
+  -> tmp_font_asset_guid 默认字体
+  -> 自动扫描项目 TMP FontAsset
+  -> 内置 fallback guid
 ```
 
 ### 9.4 字重
@@ -601,7 +660,7 @@ TMP 字重处理建议：
 
 ```text
 如果项目存在对应 FontAsset，使用对应 FontAsset。
-否则仅记录 font_weight，不强制模拟。
+否则写入 TMP.fontWeight，并根据 font_style / font_weight 设置 Bold bit。
 不要用 scale 或 outline 冒充字重。
 ```
 
@@ -687,7 +746,8 @@ Unity MCP 不应默认用纯色替代渐变。
 
 ```text
 保留 offset、blur、spread、color、opacity。
-Unity UGUI Shadow 不能完整表达 blur/spread。
+文本 drop shadow 可直接映射为 UnityEngine.UI.Shadow。
+Unity UGUI Shadow 不能完整表达 blur/spread/multiple shadow。
 如果阴影较复杂，建议切图兜底或项目自定义 Shadow 组件。
 ```
 
@@ -1072,7 +1132,16 @@ Design to Unity 应提供：
       "Image.color",
       "TMP.text",
       "TMP.fontSize",
-      "TMP.color"
+      "TMP.color",
+      "TMP.font",
+      "TMP.fontStyle",
+      "TMP.richText",
+      "TMP.lineSpacing",
+      "TMP.characterSpacing",
+      "Outline.effectColor",
+      "Outline.effectDistance",
+      "Shadow.effectColor",
+      "Shadow.effectDistance"
     ],
     "preserve_by_default": [
       "custom_scripts",

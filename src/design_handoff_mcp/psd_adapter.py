@@ -230,6 +230,7 @@ def make_psd_packet(
                 }
             )
 
+    _attach_text_hints(root_node, warnings)
     _attach_text_button_hints(root_node, warnings)
     _attach_slider_hints(root_node, warnings)
     _attach_scroll_hints(root_node, warnings)
@@ -1071,6 +1072,66 @@ def _attach_text_button_hints(root: dict[str, Any], warnings: list[dict[str, Any
             "default_add_button": True,
             "label_node_id": text_node.get("id"),
         }
+
+
+def _attach_text_hints(root: dict[str, Any], warnings: list[dict[str, Any]]) -> None:
+    for node in _walk_nodes(root):
+        text = node.get("text") or {}
+        if not text.get("content"):
+            continue
+        effects = text.get("effects") if isinstance(text.get("effects"), dict) else {}
+        spans = text.get("spans") if isinstance(text.get("spans"), list) else []
+        font_hint = text.get("font_hint") if isinstance(text.get("font_hint"), dict) else {}
+        effect_components = []
+        if effects.get("outline"):
+            effect_components.append("Outline")
+        if effects.get("shadow"):
+            effect_components.append("Shadow")
+        node["unity_text_hint"] = {
+            "can_use_textmeshpro": True,
+            "default_use_textmeshpro": True,
+            "rich_text_enabled": bool(spans),
+            "span_count": len(spans),
+            "font_hint": font_hint,
+            "effect_components": effect_components,
+            "uses_outline_component": "Outline" in effect_components,
+            "uses_shadow_component": "Shadow" in effect_components,
+            "requires_visual_review": bool(text.get("style_quality") == "best_effort" or text.get("unsupported_text_features")),
+            "notes": [
+                "Text style is normalized for TextMeshProUGUI; compare against the Photoshop reference for final visual QA.",
+                "Font mapping can be supplied with tmp_font_asset_map when writing the Unity prefab.",
+            ],
+        }
+        if spans:
+            warnings.append(
+                {
+                    "node_id": node.get("id"),
+                    "code": "psd_text_rich_style_detected",
+                    "severity": "low",
+                    "message": "Text has multiple style spans; direct YAML writes TMP rich text tags for color/size/bold/italic/underline where possible.",
+                }
+            )
+        if effect_components:
+            warnings.append(
+                {
+                    "node_id": node.get("id"),
+                    "code": "psd_text_effect_mapped",
+                    "severity": "low",
+                    "message": f"Text effects were mapped to Unity UI components: {', '.join(effect_components)}.",
+                }
+            )
+
+
+def _walk_nodes(root: dict[str, Any]) -> list[dict[str, Any]]:
+    result = []
+
+    def walk(node: dict[str, Any]) -> None:
+        result.append(node)
+        for child in node.get("children") or []:
+            walk(child)
+
+    walk(root)
+    return result
 
 
 def _attach_input_hints(root: dict[str, Any], warnings: list[dict[str, Any]]) -> None:
@@ -1927,6 +1988,21 @@ def _text_info(layer: Any, scale: float, warnings: list[dict[str, Any]], node_id
     if not font_size:
         rect = _scaled_rect(_bbox_rect(layer), scale)
         font_size = max(1, round((rect.get("height") or 24) * 0.7, 1))
+    text = _normalize_text_payload(
+        content=str(content),
+        text_style={
+            "font_family": _find_font_name(engine),
+            "font_size": font_size,
+            "font_weight": _find_font_weight(engine),
+            "font_style": _find_font_style(engine),
+            "color": color,
+            "align": _find_alignment(engine),
+            "spans": _text_spans_from_engine(engine, str(content), scale),
+            "effects": _text_effects_from_layer(layer),
+            "style_quality": "best_effort",
+        },
+        scale=scale,
+    )
     warnings.append(
         {
             "node_id": node_id,
@@ -1935,18 +2011,261 @@ def _text_info(layer: Any, scale: float, warnings: list[dict[str, Any]], node_id
             "message": "PSD text style was mapped best-effort to TextMeshProUGUI; verify font asset, alignment, and line spacing in Unity.",
         }
     )
-    return {
-        "content": str(content),
-        "font_family": _find_font_name(engine),
-        "font_size": round(float(font_size) / scale, 1) if scale > 1 else round(float(font_size), 1),
-        "font_weight": None,
-        "color": color,
-        "align": _find_alignment(engine),
-        "line_height": None,
-        "letter_spacing": 0,
-        "overflow": "clip",
-        "wrap": "\n" in str(content),
+    return text
+
+
+def _normalize_text_payload(content: str, text_style: dict[str, Any], scale: float) -> dict[str, Any]:
+    font_size = _coerce_scaled_number(text_style.get("font_size") or text_style.get("fontSize") or text_style.get("size"), scale, 24)
+    line_height = _coerce_scaled_number(text_style.get("line_height") or text_style.get("lineHeight") or text_style.get("leading"), scale, None)
+    letter_spacing = _coerce_scaled_number(text_style.get("letter_spacing") or text_style.get("letterSpacing") or text_style.get("tracking"), scale, 0)
+    font_family = text_style.get("font_family") or text_style.get("fontFamily") or text_style.get("font")
+    font_style = text_style.get("font_style") or text_style.get("fontStyle") or text_style.get("style")
+    font_weight = text_style.get("font_weight") or text_style.get("fontWeight") or _font_weight_from_style(font_style)
+    spans = _normalize_text_spans(
+        text_style.get("spans") or text_style.get("runs") or text_style.get("styleRanges") or text_style.get("ranges"),
+        content,
+        scale,
+    )
+    effects = _normalize_text_effects(text_style)
+    result: dict[str, Any] = {
+        "content": content,
+        "font_family": font_family,
+        "font_size": font_size,
+        "font_weight": font_weight,
+        "font_style": font_style,
+        "color": text_style.get("color") or text_style.get("fill"),
+        "align": text_style.get("align") or text_style.get("alignment"),
+        "line_height": line_height,
+        "letter_spacing": letter_spacing or 0,
+        "overflow": text_style.get("overflow") or "clip",
+        "wrap": bool(text_style.get("wrap")) or "\n" in content,
+        "style_quality": text_style.get("style_quality") or "explicit",
+        "font_hint": {
+            "source_font_family": font_family,
+            "source_font_style": font_style,
+            "source_font_weight": font_weight,
+            "font_asset_lookup_key": _font_lookup_key(" ".join(str(item) for item in (font_family, font_style or font_weight or "") if item)),
+            "tmp_font_asset_guid": text_style.get("tmp_font_asset_guid") or text_style.get("tmpFontAssetGuid") or text_style.get("unity_font_asset_guid") or text_style.get("unityFontAssetGuid"),
+            "fallback_policy": "use_project_default_tmp_font",
+        },
     }
+    if spans:
+        result["spans"] = spans
+        result["rich_text"] = True
+    if effects:
+        result["effects"] = effects
+    return {key: value for key, value in result.items() if value is not None}
+
+
+def _normalize_text_spans(raw: Any, content: str, scale: float) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    result = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        start = int(_num(_first_present(item, ("start", "from", "offset"))) or 0)
+        length = _num(item.get("length"))
+        end = _num(_first_present(item, ("end", "to")))
+        if length is None and end is not None:
+            length = max(0, end - start)
+        if length is None:
+            length = len(content) - start
+        if length <= 0:
+            continue
+        style = item.get("style") if isinstance(item.get("style"), dict) else item
+        normalized = {
+            "start": max(0, start),
+            "length": max(0, int(length)),
+            "font_family": style.get("font_family") or style.get("fontFamily") or style.get("font"),
+            "font_size": _coerce_scaled_number(style.get("font_size") or style.get("fontSize") or style.get("size"), scale, None),
+            "font_weight": style.get("font_weight") or style.get("fontWeight") or _font_weight_from_style(style.get("font_style") or style.get("fontStyle")),
+            "font_style": style.get("font_style") or style.get("fontStyle") or style.get("style"),
+            "color": style.get("color") or style.get("fill"),
+            "underline": style.get("underline"),
+            "italic": style.get("italic"),
+        }
+        result.append({key: value for key, value in normalized.items() if value is not None})
+    return result
+
+
+def _normalize_text_effects(style: dict[str, Any]) -> dict[str, Any]:
+    effects: dict[str, Any] = {}
+    raw_effects = style.get("effects") if isinstance(style.get("effects"), (dict, list)) else None
+    outline = (
+        style.get("outline")
+        or style.get("stroke")
+        or style.get("textStroke")
+        or _effect_from_collection(raw_effects, ("outline", "stroke", "framefx"))
+    )
+    shadow = (
+        style.get("shadow")
+        or style.get("dropShadow")
+        or style.get("drop_shadow")
+        or _effect_from_collection(raw_effects, ("shadow", "dropshadow", "drop_shadow"))
+    )
+    stroke_width = _first_present(style, ("stroke_width", "strokeWidth", "outline_width", "outlineWidth"))
+    stroke_color = _first_present(style, ("stroke_color", "strokeColor", "outline_color", "outlineColor"))
+    if outline or stroke_width or stroke_color:
+        outline_dict = outline if isinstance(outline, dict) else {}
+        enabled = outline_dict.get("enabled", True)
+        if enabled:
+            effects["outline"] = {
+                "width": _num(_first_present(outline_dict, ("width", "size"), stroke_width), 1),
+                "color": outline_dict.get("color") or outline_dict.get("fill") or stroke_color or "rgba(0,0,0,1)",
+                "use_graphic_alpha": outline_dict.get("use_graphic_alpha", True),
+            }
+    shadow_color = _first_present(style, ("shadow_color", "shadowColor"))
+    shadow_x = _first_present(style, ("shadow_offset_x", "shadowOffsetX"))
+    shadow_y = _first_present(style, ("shadow_offset_y", "shadowOffsetY"))
+    if shadow or shadow_color or shadow_x is not None or shadow_y is not None:
+        shadow_dict = shadow if isinstance(shadow, dict) else {}
+        enabled = shadow_dict.get("enabled", True)
+        if enabled:
+            offset = shadow_dict.get("offset") if isinstance(shadow_dict.get("offset"), dict) else {}
+            effects["shadow"] = {
+                "color": shadow_dict.get("color") or shadow_color or "rgba(0,0,0,0.5)",
+                "offset": {
+                    "x": _num(_first_present(offset, ("x",), _first_present(shadow_dict, ("x",), shadow_x)), 1),
+                    "y": _num(_first_present(offset, ("y",), _first_present(shadow_dict, ("y",), shadow_y)), -1),
+                },
+                "use_graphic_alpha": shadow_dict.get("use_graphic_alpha", True),
+            }
+    return effects
+
+
+def _text_spans_from_engine(engine: Any, content: str, scale: float) -> list[dict[str, Any]]:
+    run_array = _find_first_by_key(engine, ("RunArray", "runArray"))
+    if not isinstance(run_array, list):
+        return []
+    result = []
+    cursor = 0
+    for run in run_array:
+        if not isinstance(run, dict):
+            continue
+        length = int(_num(run.get("RunLength") or run.get("runLength"), 0))
+        style_data = _find_first_by_key(run, ("StyleSheetData", "styleSheetData")) or run
+        if length <= 0:
+            continue
+        result.append(
+            {
+                "start": cursor,
+                "length": min(length, max(0, len(content) - cursor)),
+                "font_family": _find_font_name(style_data),
+                "font_size": _coerce_scaled_number(_find_first_number(style_data, ("FontSize", "fontSize", "font-size")), scale, None),
+                "font_weight": _find_font_weight(style_data),
+                "font_style": _find_font_style(style_data),
+                "color": _find_first_color(style_data),
+            }
+        )
+        cursor += length
+    return [{key: value for key, value in span.items() if value is not None} for span in result if span.get("length")]
+
+
+def _text_effects_from_layer(layer: Any) -> dict[str, Any]:
+    raw = getattr(layer, "effects", None)
+    if callable(raw):
+        try:
+            raw = raw()
+        except Exception:
+            raw = None
+    return _normalize_text_effects({"effects": raw})
+
+
+def _effect_from_collection(raw: Any, tokens: tuple[str, ...]) -> Any:
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            normalized = _normalize_feature_token(key)
+            if any(token in normalized for token in tokens):
+                return value if isinstance(value, dict) else {"enabled": bool(value)}
+        for value in raw.values():
+            match = _effect_from_collection(value, tokens)
+            if match:
+                return match
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                effect_type = _normalize_feature_token(item.get("type") or item.get("name") or item.get("effect") or "")
+                if any(token in effect_type for token in tokens):
+                    return item
+                match = _effect_from_collection(item, tokens)
+                if match:
+                    return match
+            else:
+                effect_type = _normalize_feature_token(item)
+                if any(token in effect_type for token in tokens):
+                    return {"enabled": True}
+    return None
+
+
+def _coerce_scaled_number(value: Any, scale: float, default: float | None) -> float | None:
+    number = _num(value)
+    if number is None:
+        return default
+    if scale > 1:
+        number = number / scale
+    return round(float(number), 3)
+
+
+def _font_lookup_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _font_weight_from_style(value: Any) -> int | None:
+    lowered = str(value or "").lower()
+    if any(token in lowered for token in ("black", "heavy", "bold", "semibold", "demibold")):
+        return 700
+    if "medium" in lowered:
+        return 500
+    if "light" in lowered:
+        return 300
+    return None
+
+
+def _find_font_weight(obj: Any) -> int | None:
+    direct = _find_first_by_key(obj, ("FontWeight", "fontWeight", "weight"))
+    if direct is not None:
+        number = _num(direct)
+        if number is not None:
+            return int(number)
+        return _font_weight_from_style(direct)
+    return _font_weight_from_style(_find_font_style(obj))
+
+
+def _find_font_style(obj: Any) -> str | None:
+    for key, value in _walk_items(obj):
+        lowered = str(key).lower()
+        if lowered in {"fontstyle", "font_style", "style", "stylename"} and isinstance(value, str):
+            return value
+        if lowered in {"fauxbold", "bold"} and value:
+            return "Bold"
+        if lowered in {"fauxitalic", "italic"} and value:
+            return "Italic"
+    return None
+
+
+def _find_first_by_key(obj: Any, names: tuple[str, ...]) -> Any:
+    wanted = {name.lower() for name in names}
+    for key, value in _walk_items(obj):
+        if str(key).lower() in wanted:
+            return value
+    return None
+
+
+def _first_present(obj: dict[str, Any], names: tuple[str, ...], default: Any = None) -> Any:
+    for name in names:
+        if name in obj and obj.get(name) is not None:
+            return obj.get(name)
+    return default
+
+
+def _num(value: Any, default: float | None = None) -> float | None:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _text_content(layer: Any) -> str | None:

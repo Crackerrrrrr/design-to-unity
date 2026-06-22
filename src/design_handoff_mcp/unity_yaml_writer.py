@@ -23,6 +23,8 @@ RECT_MASK_2D_SCRIPT_GUID = "3312d7739989d2b4e91e6319e9a96d76"
 VERTICAL_LAYOUT_GROUP_SCRIPT_GUID = "59f8146938fff824cb5fd77236b75775"
 HORIZONTAL_LAYOUT_GROUP_SCRIPT_GUID = "30649d3a9faa99c48a7b1166b86bf2a0"
 GRID_LAYOUT_GROUP_SCRIPT_GUID = "8a8695521f0d02e499659fee002a26c2"
+OUTLINE_SCRIPT_GUID = "e19747de3f5aca642ab2be37e372fb86"
+SHADOW_SCRIPT_GUID = "cfabb0440166ab443bba8876756fdfa9"
 DEFAULT_TMP_FONT_ASSET_GUID = "2f7116f10747a67409388e93052ae222"
 TMP_FONT_ASSET_FILE_ID = 11400000
 SPRITE_FILE_ID = 21300000
@@ -49,6 +51,7 @@ def write_unity_prefab_yaml(
     add_layout_components: bool = True,
     add_canvas_group_components: bool = True,
     tmp_font_asset_guid: str | None = None,
+    tmp_font_asset_map: dict[str, str] | str | None = None,
     prefab_visual_mode: str = "layered",
 ) -> dict[str, Any]:
     project_root = Path(unity_project_path).expanduser().resolve()
@@ -90,6 +93,7 @@ def write_unity_prefab_yaml(
         prefab_visual_mode=normalized_visual_mode,
     )
     tmp_font = _resolve_tmp_font(project_root, tmp_font_asset_guid)
+    tmp_font_map = _normalize_tmp_font_asset_map(tmp_font_asset_map)
     tmp_font_guid = tmp_font.get("guid")
     tmp_font_material_file_id = tmp_font.get("material_file_id")
     if use_text_components:
@@ -128,8 +132,8 @@ def write_unity_prefab_yaml(
         add_mask_components=add_mask_components,
         add_layout_components=add_layout_components,
         add_canvas_group_components=add_canvas_group_components,
-        tmp_font_guid=tmp_font_guid,
-        tmp_font_material_file_id=tmp_font_material_file_id,
+        default_tmp_font=tmp_font,
+        tmp_font_asset_map=tmp_font_map,
         prefab_visual_mode=normalized_visual_mode,
     )
     prefab_path = project_root / prefab_asset_path
@@ -189,9 +193,12 @@ def write_unity_prefab_yaml(
         "vertical_layout_group_node_count": stats["vertical_layout_group_node_count"],
         "horizontal_layout_group_node_count": stats["horizontal_layout_group_node_count"],
         "grid_layout_group_node_count": stats["grid_layout_group_node_count"],
+        "outline_node_count": stats["outline_node_count"],
+        "shadow_node_count": stats["shadow_node_count"],
         "canvas_group_node_count": stats["canvas_group_node_count"],
         "tmp_font_asset_guid": tmp_font_guid,
         "tmp_font_material_file_id": tmp_font_material_file_id,
+        "tmp_font_asset_map_count": len(tmp_font_map),
         "missing_asset_count": len([w for w in warnings if w.get("code") == "missing_asset"]),
         "warnings": warnings,
         "caveats": [
@@ -359,8 +366,8 @@ def _build_prefab_yaml(
     add_mask_components: bool,
     add_layout_components: bool,
     add_canvas_group_components: bool,
-    tmp_font_guid: str | None,
-    tmp_font_material_file_id: int | None,
+    default_tmp_font: dict[str, Any],
+    tmp_font_asset_map: dict[str, str],
     prefab_visual_mode: str,
 ) -> tuple[str, dict[str, int], dict[str, Any]]:
     packet_id = str(packet.get("packet_id") or "packet")
@@ -423,6 +430,9 @@ def _build_prefab_yaml(
         has_rect_mask = bool((add_scroll_components and node_id in scroll_viewport_node_ids) or (add_mask_components and _should_add_mask_component(node)))
         layout_component = _layout_component(node, add_layout_components)
         has_canvas_group = bool(add_canvas_group_components and _needs_canvas_group(node, children.get(node_id) or []))
+        text_effects = _text_effects(node)
+        has_text_outline = bool(has_text and text_effects.get("outline"))
+        has_text_shadow = bool(has_text and text_effects.get("shadow"))
         needs_control_hit_area = bool(
             (has_button or has_toggle or has_input_field or has_dropdown or has_scrollbar or semantic_type == "slider_candidate")
             and not has_sprite
@@ -448,6 +458,8 @@ def _build_prefab_yaml(
             "vertical_layout_group": _file_id(packet_id, node_id, "vertical_layout_group", used_file_ids) if layout_component == "VerticalLayoutGroup" else None,
             "horizontal_layout_group": _file_id(packet_id, node_id, "horizontal_layout_group", used_file_ids) if layout_component == "HorizontalLayoutGroup" else None,
             "grid_layout_group": _file_id(packet_id, node_id, "grid_layout_group", used_file_ids) if layout_component == "GridLayoutGroup" else None,
+            "outline": _file_id(packet_id, node_id, "outline", used_file_ids) if has_text_outline else None,
+            "shadow": _file_id(packet_id, node_id, "shadow", used_file_ids) if has_text_shadow else None,
             "canvas_group": _file_id(packet_id, node_id, "canvas_group", used_file_ids) if has_canvas_group else None,
         }
 
@@ -474,6 +486,8 @@ def _build_prefab_yaml(
     vertical_layout_group_count = 0
     horizontal_layout_group_count = 0
     grid_layout_group_count = 0
+    outline_count = 0
+    shadow_count = 0
     canvas_group_count = 0
     for node in all_nodes:
         node_id = str(node.get("id"))
@@ -518,17 +532,24 @@ def _build_prefab_yaml(
             image_count += 1
         if has_text:
             raycast = bool(has_button)
+            text_font = _resolve_tmp_font_for_text(node.get("text") or {}, default_tmp_font, tmp_font_asset_map)
             lines.extend(
                 _tmp_text_yaml(
                     node,
                     ids_for_node,
-                    tmp_font_guid,
-                    tmp_font_material_file_id,
+                    text_font.get("guid"),
+                    text_font.get("material_file_id"),
                     raycast_target=raycast,
                     transparent=suppress_source_visual,
                 )
             )
             tmp_text_count += 1
+        if ids_for_node.get("outline"):
+            lines.extend(_outline_yaml(node, ids_for_node))
+            outline_count += 1
+        if ids_for_node.get("shadow"):
+            lines.extend(_shadow_yaml(node, ids_for_node))
+            shadow_count += 1
         if has_button:
             target_graphic = ids_for_node.get("image") or ids_for_node.get("tmp_text") or 0
             lines.extend(_button_yaml(ids_for_node, target_graphic))
@@ -625,6 +646,8 @@ def _build_prefab_yaml(
         "vertical_layout_group_node_count": vertical_layout_group_count,
         "horizontal_layout_group_node_count": horizontal_layout_group_count,
         "grid_layout_group_node_count": grid_layout_group_count,
+        "outline_node_count": outline_count,
+        "shadow_node_count": shadow_count,
         "canvas_group_node_count": canvas_group_count,
     }
     source_map = _prefab_source_map(
@@ -686,6 +709,7 @@ def _prefab_source_map(
             "source_metadata": node.get("source_metadata"),
             "content_hash": node.get("content_hash"),
             "component_file_ids": component_file_ids,
+            "unity_text_hint": node.get("unity_text_hint"),
             "unity_button_hint": node.get("unity_button_hint"),
             "unity_slider_hint": node.get("unity_slider_hint"),
             "unity_toggle_hint": node.get("unity_toggle_hint"),
@@ -826,6 +850,8 @@ def _unity_import_manifest(
             "VerticalLayoutGroup": stats.get("vertical_layout_group_node_count", 0),
             "HorizontalLayoutGroup": stats.get("horizontal_layout_group_node_count", 0),
             "GridLayoutGroup": stats.get("grid_layout_group_node_count", 0),
+            "Outline": stats.get("outline_node_count", 0),
+            "Shadow": stats.get("shadow_node_count", 0),
             "CanvasGroup": stats.get("canvas_group_node_count", 0),
         },
         "import_gates": [
@@ -875,6 +901,15 @@ def _update_policy_hint() -> dict[str, list[str]]:
             "TextMeshProUGUI.text",
             "TextMeshProUGUI.fontSize",
             "TextMeshProUGUI.color",
+            "TextMeshProUGUI.font",
+            "TextMeshProUGUI.fontStyle",
+            "TextMeshProUGUI.richText",
+            "TextMeshProUGUI.lineSpacing",
+            "TextMeshProUGUI.characterSpacing",
+            "Outline.effectColor",
+            "Outline.effectDistance",
+            "Shadow.effectColor",
+            "Shadow.effectDistance",
             "Button.targetGraphic",
             "Slider.fillRect",
             "Slider.handleRect",
@@ -947,6 +982,10 @@ def _game_object_yaml(node: dict[str, Any], ids: dict[str, int | None]) -> list[
         component_lines.append(f"  - component: {{fileID: {ids['scrollbar']}}}")
     if ids.get("scroll_rect"):
         component_lines.append(f"  - component: {{fileID: {ids['scroll_rect']}}}")
+    if ids.get("outline"):
+        component_lines.append(f"  - component: {{fileID: {ids['outline']}}}")
+    if ids.get("shadow"):
+        component_lines.append(f"  - component: {{fileID: {ids['shadow']}}}")
     if ids.get("canvas_group"):
         component_lines.append(f"  - component: {{fileID: {ids['canvas_group']}}}")
     active = 0 if node.get("semantic_type") == "dropdown_template_candidate" else 1
@@ -1095,7 +1134,11 @@ def _tmp_text_yaml(
         color = (color[0], color[1], color[2], 0)
     font_size = max(1, int(round(_num(text.get("font_size"), 24))))
     font_weight = _tmp_font_weight(text)
+    font_style = _tmp_font_style(text)
     horizontal_alignment = _tmp_horizontal_alignment(text.get("align"))
+    wrapping = 1 if text.get("wrap") else 0
+    line_spacing = _tmp_line_spacing(text, font_size)
+    content = _tmp_rich_text_content(text)
     font_asset = f"{{fileID: {TMP_FONT_ASSET_FILE_ID}, guid: {tmp_font_guid}, type: 2}}" if tmp_font_guid else "{fileID: 0}"
     shared_material = (
         f"{{fileID: {tmp_font_material_file_id}, guid: {tmp_font_guid}, type: 2}}"
@@ -1124,7 +1167,7 @@ def _tmp_text_yaml(
         "  m_OnCullStateChanged:",
         "    m_PersistentCalls:",
         "      m_Calls: []",
-        f"  m_text: {_yaml_string(str(text.get('content') or ''))}",
+        f"  m_text: {_yaml_string(content)}",
         "  m_isRightToLeft: 0",
         f"  m_fontAsset: {font_asset}",
         f"  m_sharedMaterial: {shared_material}",
@@ -1153,17 +1196,17 @@ def _tmp_text_yaml(
         "  m_enableAutoSizing: 0",
         f"  m_fontSizeMin: {max(1, min(font_size, 8))}",
         f"  m_fontSizeMax: {max(font_size, 72)}",
-        "  m_fontStyle: 0",
+        f"  m_fontStyle: {font_style}",
         f"  m_HorizontalAlignment: {horizontal_alignment}",
         "  m_VerticalAlignment: 512",
         "  m_textAlignment: 65535",
         f"  m_characterSpacing: {_num(text.get('letter_spacing'), 0)}",
         "  m_wordSpacing: 0",
-        "  m_lineSpacing: 0",
+        f"  m_lineSpacing: {_num(line_spacing, 0)}",
         "  m_lineSpacingMax: 0",
         "  m_paragraphSpacing: 0",
         "  m_charWidthMaxAdj: 0",
-        "  m_TextWrappingMode: 1",
+        f"  m_TextWrappingMode: {wrapping}",
         "  m_wordWrappingRatios: 0.4",
         "  m_overflowMode: 0",
         "  m_linkedTextComponent: {fileID: 0}",
@@ -1191,6 +1234,74 @@ def _tmp_text_yaml(
         "  m_hasFontAssetChanged: 0",
         "  m_baseMaterial: {fileID: 0}",
         "  m_maskOffset: {x: 0, y: 0, z: 0, w: 0}",
+    ]
+
+
+def _outline_yaml(node: dict[str, Any], ids: dict[str, int | None]) -> list[str]:
+    outline = (_text_effects(node).get("outline") or {})
+    color = _unity_color(outline.get("color"), fallback=(0, 0, 0, 1))
+    width_source = outline.get("width") if outline.get("width") is not None else outline.get("size")
+    width = max(0.0, _num(width_source, 1))
+    return _mesh_effect_yaml(
+        ids=ids,
+        id_key="outline",
+        script_guid=OUTLINE_SCRIPT_GUID,
+        class_name="Outline",
+        color=color,
+        distance={"x": width, "y": -width},
+        use_graphic_alpha=outline.get("use_graphic_alpha", True),
+    )
+
+
+def _shadow_yaml(node: dict[str, Any], ids: dict[str, int | None]) -> list[str]:
+    shadow = (_text_effects(node).get("shadow") or {})
+    color = _unity_color(shadow.get("color"), fallback=(0, 0, 0, 0.5))
+    offset = shadow.get("offset") or shadow.get("distance") or {}
+    if isinstance(offset, (list, tuple)):
+        x = _num(offset[0], 1) if len(offset) > 0 else 1
+        y = _num(offset[1], -1) if len(offset) > 1 else -1
+    elif isinstance(offset, dict):
+        x = _num(offset.get("x"), _num(shadow.get("x"), 1))
+        y = _num(offset.get("y"), _num(shadow.get("y"), -1))
+    else:
+        x = _num(shadow.get("x"), 1)
+        y = _num(shadow.get("y"), -1)
+    return _mesh_effect_yaml(
+        ids=ids,
+        id_key="shadow",
+        script_guid=SHADOW_SCRIPT_GUID,
+        class_name="Shadow",
+        color=color,
+        distance={"x": x, "y": y},
+        use_graphic_alpha=shadow.get("use_graphic_alpha", True),
+    )
+
+
+def _mesh_effect_yaml(
+    ids: dict[str, int | None],
+    id_key: str,
+    script_guid: str,
+    class_name: str,
+    color: tuple[float, float, float, float],
+    distance: dict[str, float],
+    use_graphic_alpha: Any,
+) -> list[str]:
+    return [
+        f"--- !u!114 &{ids[id_key]}",
+        "MonoBehaviour:",
+        "  m_ObjectHideFlags: 0",
+        "  m_CorrespondingSourceObject: {fileID: 0}",
+        "  m_PrefabInstance: {fileID: 0}",
+        "  m_PrefabAsset: {fileID: 0}",
+        f"  m_GameObject: {{fileID: {ids['go']}}}",
+        "  m_Enabled: 1",
+        "  m_EditorHideFlags: 0",
+        f"  m_Script: {{fileID: 11500000, guid: {script_guid}, type: 3}}",
+        "  m_Name: ",
+        f"  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.{class_name}",
+        f"  m_EffectColor: {_color_yaml(color)}",
+        f"  m_EffectDistance: {{x: {_num(distance.get('x'), 0)}, y: {_num(distance.get('y'), 0)}}}",
+        f"  m_UseGraphicAlpha: {_bool_int(use_graphic_alpha)}",
     ]
 
 
@@ -1857,6 +1968,58 @@ def _resolve_tmp_font(project_root: Path, explicit_guid: str | None) -> dict[str
     return {"guid": DEFAULT_TMP_FONT_ASSET_GUID, "material_file_id": None}
 
 
+def _normalize_tmp_font_asset_map(value: dict[str, str] | str | None) -> dict[str, str]:
+    if value is None:
+        return {}
+    raw = value
+    if isinstance(value, str):
+        if not value.strip():
+            return {}
+        raw = json.loads(value)
+    if not isinstance(raw, dict):
+        raise ValueError("tmp_font_asset_map must be a dict or a JSON object string.")
+    result: dict[str, str] = {}
+    for key, guid in raw.items():
+        key_text = str(key or "").strip()
+        guid_text = str(guid or "").strip().lower()
+        if not key_text:
+            continue
+        if not re.fullmatch(r"[0-9a-fA-F]{32}", guid_text):
+            raise ValueError(f"TMP font asset guid for '{key_text}' must be a 32-character Unity asset guid.")
+        result[_font_lookup_key(key_text)] = guid_text
+    return result
+
+
+def _resolve_tmp_font_for_text(text: dict[str, Any], default_font: dict[str, Any], font_map: dict[str, str]) -> dict[str, Any]:
+    explicit_guid = (
+        text.get("tmp_font_asset_guid")
+        or text.get("unity_font_asset_guid")
+        or ((text.get("font_hint") or {}).get("tmp_font_asset_guid") if isinstance(text.get("font_hint"), dict) else None)
+    )
+    if explicit_guid and re.fullmatch(r"[0-9a-fA-F]{32}", str(explicit_guid).strip()):
+        return {"guid": str(explicit_guid).strip().lower(), "material_file_id": None}
+
+    candidates = []
+    font_family = text.get("font_family")
+    font_style = text.get("font_style")
+    font_weight = text.get("font_weight")
+    if font_family and font_style:
+        candidates.append(f"{font_family} {font_style}")
+    if font_family and font_weight:
+        candidates.append(f"{font_family} {font_weight}")
+    if font_family:
+        candidates.append(str(font_family))
+    for candidate in candidates:
+        guid = font_map.get(_font_lookup_key(candidate))
+        if guid:
+            return {"guid": guid, "material_file_id": None}
+    return default_font
+
+
+def _font_lookup_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
 def _tmp_font_priority(meta_path: Path) -> tuple[int, str]:
     text = str(meta_path).lower()
     if "liberationsans" in text:
@@ -1899,13 +2062,122 @@ def _has_text(node: dict[str, Any]) -> bool:
     return bool(str(text.get("content") or "").strip())
 
 
+def _text_effects(node: dict[str, Any]) -> dict[str, Any]:
+    text = node.get("text") or {}
+    effects = text.get("effects") if isinstance(text, dict) else None
+    return effects if isinstance(effects, dict) else {}
+
+
+def _tmp_rich_text_content(text: dict[str, Any]) -> str:
+    content = str(text.get("content") or "")
+    spans = text.get("spans") if isinstance(text.get("spans"), list) else []
+    if not spans:
+        return content
+    pieces = []
+    cursor = 0
+    content_len = len(content)
+    for span in sorted([item for item in spans if isinstance(item, dict)], key=lambda item: int(_num(item.get("start"), 0))):
+        start = max(0, min(content_len, int(_num(span.get("start"), 0))))
+        length = int(_num(span.get("length"), content_len - start))
+        end = max(start, min(content_len, start + max(0, length)))
+        if start > cursor:
+            pieces.append(_tmp_escape_text(content[cursor:start]))
+        if end > start:
+            open_tags, close_tags = _tmp_rich_tags(span)
+            pieces.append("".join(open_tags))
+            pieces.append(_tmp_escape_text(content[start:end]))
+            pieces.append("".join(reversed(close_tags)))
+        cursor = max(cursor, end)
+    if cursor < content_len:
+        pieces.append(_tmp_escape_text(content[cursor:]))
+    return "".join(pieces)
+
+
+def _tmp_escape_text(value: str) -> str:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _tmp_rich_tags(style: dict[str, Any]) -> tuple[list[str], list[str]]:
+    open_tags: list[str] = []
+    close_tags: list[str] = []
+    color = style.get("color")
+    if color:
+        open_tags.append(f"<color={_tmp_hex_color(color)}>")
+        close_tags.append("</color>")
+    font_size_source = style.get("font_size") if style.get("font_size") is not None else style.get("fontSize")
+    font_size = _num(font_size_source)
+    if font_size:
+        open_tags.append(f"<size={_num(font_size, 0)}>")
+        close_tags.append("</size>")
+    font_style = str(style.get("font_style") or style.get("fontStyle") or "").lower()
+    font_weight = str(style.get("font_weight") or style.get("fontWeight") or "").lower()
+    if "bold" in font_style or "bold" in font_weight or font_weight in {"700", "800", "900"}:
+        open_tags.append("<b>")
+        close_tags.append("</b>")
+    if "italic" in font_style or bool(style.get("italic")):
+        open_tags.append("<i>")
+        close_tags.append("</i>")
+    if "underline" in font_style or bool(style.get("underline")):
+        open_tags.append("<u>")
+        close_tags.append("</u>")
+    return open_tags, close_tags
+
+
+def _tmp_hex_color(value: Any) -> str:
+    color = _unity_color(value)
+    r, g, b, a = [max(0, min(255, int(round(channel * 255)))) for channel in color]
+    if a >= 255:
+        return f"#{r:02X}{g:02X}{b:02X}"
+    return f"#{r:02X}{g:02X}{b:02X}{a:02X}"
+
+
+def _tmp_font_style(text: dict[str, Any]) -> int:
+    value = str(text.get("font_style") or text.get("fontStyle") or "").lower()
+    weight = str(text.get("font_weight") or text.get("fontWeight") or "").lower()
+    result = 0
+    if "bold" in value or "bold" in weight or weight in {"700", "800", "900"}:
+        result |= 1
+    if "italic" in value:
+        result |= 2
+    if "underline" in value:
+        result |= 4
+    return result
+
+
+def _tmp_line_spacing(text: dict[str, Any], font_size: float) -> float:
+    line_height_source = text.get("line_height") if text.get("line_height") is not None else text.get("lineHeight")
+    line_height = _num(line_height_source)
+    if not line_height:
+        return 0
+    return max(-100, round((line_height - font_size) / max(1, font_size) * 100, 3))
+
+
 def _unity_color(value: Any, fallback: tuple[float, float, float, float] = (1, 1, 1, 1)) -> tuple[float, float, float, float]:
+    if isinstance(value, dict):
+        channels = []
+        for keys in (("r", "red"), ("g", "green"), ("b", "blue"), ("a", "alpha", "opacity")):
+            found = None
+            for key in keys:
+                if key in value:
+                    found = value.get(key)
+                    break
+            if found is None and keys[0] != "a":
+                return fallback
+            channels.append(float(found) if found is not None else 1)
+        if max(channels[:3], default=1) > 1:
+            channels[:3] = [item / 255 for item in channels[:3]]
+        if channels[3] > 1:
+            channels[3] = channels[3] / 255 if channels[3] <= 255 else channels[3] / 100
+        return tuple(round(max(0, min(1, item)), 4) for item in channels[:4])  # type: ignore[return-value]
+
     if isinstance(value, (list, tuple)) and len(value) >= 3:
         channels = [float(item) for item in value[:4]]
         if max(channels[:3], default=1) > 1:
-            channels = [item / 255 for item in channels]
+            channels[:3] = [item / 255 for item in channels[:3]]
         while len(channels) < 4:
             channels.append(1)
+        if channels[3] > 1:
+            channels[3] = channels[3] / 255 if channels[3] <= 255 else channels[3] / 100
         return tuple(round(max(0, min(1, item)), 4) for item in channels[:4])  # type: ignore[return-value]
 
     text = str(value or "").strip()

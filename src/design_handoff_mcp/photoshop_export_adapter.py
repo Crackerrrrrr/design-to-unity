@@ -9,7 +9,7 @@ from typing import Any
 from .asset_store import _image_size, sanitize_filename
 from .normalizer import _add_semantic, _apply_semantics, _enrich_assets, _hash, _semantic_summary, _unity_rect
 from .profiles import build_handoff_profiles
-from .psd_adapter import _attach_dropdown_hints, _attach_input_hints, _attach_layout_hints, _attach_mask_hint, _attach_radio_hints, _attach_scroll_hints, _attach_slider_hints, _attach_tab_hints
+from .psd_adapter import _attach_dropdown_hints, _attach_input_hints, _attach_layout_hints, _attach_mask_hint, _attach_radio_hints, _attach_scroll_hints, _attach_slider_hints, _attach_tab_hints, _attach_text_hints, _normalize_text_payload
 
 
 class PhotoshopExportAdapterError(RuntimeError):
@@ -38,7 +38,7 @@ def photoshop_export_schema() -> dict[str, Any]:
             "bounds": "Object with x/y/width/height or left/top/right/bottom; arrays are accepted.",
             "asset": "Relative or absolute path to exported PNG/JPG/WebP for image/group layers.",
             "nine_slice": "Optional nine-slice data, for example {'border': {'left': 16, 'right': 16, 'top': 12, 'bottom': 12}}. Also accepts nineSlice, spriteBorder, or sprite_border.",
-            "text": "String or object with content/fontSize/color/alignment for editable TMP text.",
+            "text": "String or object with content/fontSize/color/alignment plus optional fontFamily/fontStyle/fontWeight/lineHeight/letterSpacing/spans/stroke/dropShadow/tmpFontAssetGuid for editable TMP text.",
             "children": "Nested layers. Also accepts layers or nodes.",
             "role": "Optional explicit semantic_type, for example button_candidate or slider_candidate.",
             "opacity": "0..1, 0..100, or 0..255.",
@@ -254,6 +254,7 @@ def make_photoshop_export_packet(
         if node:
             root_node["children"].append(node)
 
+    _attach_text_hints(root_node, warnings)
     _attach_slider_hints(root_node, warnings)
     _attach_scroll_hints(root_node, warnings)
     _attach_layout_hints(root_node, warnings)
@@ -625,20 +626,7 @@ def _text_info(layer: dict[str, Any], scale: float) -> dict[str, Any] | None:
         return None
     if content is None:
         return None
-    font_size = _num(text_style.get("font_size") or text_style.get("fontSize") or text_style.get("size")) or 24
-    color = text_style.get("color") or text_style.get("fill")
-    return {
-        "content": str(content),
-        "font_family": text_style.get("font_family") or text_style.get("fontFamily") or text_style.get("font"),
-        "font_size": round(font_size / scale, 1) if scale > 1 else round(font_size, 1),
-        "font_weight": text_style.get("font_weight") or text_style.get("fontWeight"),
-        "color": color,
-        "align": text_style.get("align") or text_style.get("alignment"),
-        "line_height": text_style.get("line_height") or text_style.get("lineHeight"),
-        "letter_spacing": _num(text_style.get("letter_spacing") or text_style.get("letterSpacing")) or 0,
-        "overflow": text_style.get("overflow") or "clip",
-        "wrap": bool(text_style.get("wrap")) or "\n" in str(content),
-    }
+    return _normalize_text_payload(str(content), text_style, scale)
 
 
 def _feature_info(layer: dict[str, Any], style: dict[str, Any]) -> dict[str, Any]:

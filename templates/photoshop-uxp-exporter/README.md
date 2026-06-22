@@ -31,7 +31,18 @@ psd_design_convert_export_to_unity_prefab(export_path, unity_project_path)
 7. Click `Export Active Document`.
 8. Run `psd_design_validate_export(export_path)` before writing Unity files.
 
-The template exports a flattened `preview.png`, layer tree metadata, editable text metadata when Photoshop exposes it, and PNG assets for visible non-text leaf layers. When `Rasterize complex groups` is enabled, groups with masks, layer effects, clipping, smart objects, adjustment layers, or non-normal blend modes are exported as a single PNG and marked with `rasterized: true`.
+The template exports a flattened `preview.png`, layer tree metadata, editable text metadata when Photoshop exposes it, and PNG assets for visible non-text leaf layers. Text metadata includes best-effort font family/style/weight, size, line height, character spacing, color, alignment, rich style spans from `textStyleRange`, stroke, and drop shadow. When `Rasterize complex groups` is enabled, groups with masks, layer effects, clipping, smart objects, adjustment layers, or non-normal blend modes are exported as a single PNG and marked with `rasterized: true`.
+
+For higher fidelity editable text, keep text layers editable and provide a project font map when writing Unity prefab YAML:
+
+```json
+{
+  "Inter-Bold Italic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "PingFangSC-Semibold": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}
+```
+
+Pass that object as `tmp_font_asset_map_json`. Explicit per-layer `tmpFontAssetGuid` still wins when it is present in `design.json`. Photoshop stroke is mapped to UGUI `Outline`; drop shadow is mapped to UGUI `Shadow`. Blur/spread and advanced Photoshop text engine features remain visual-QA items, so keep `preview.png` for screenshot diff.
 
 For scalable buttons or panels, add explicit nine-slice data in `design.json` with `nine_slice`, `nineSlice`, `spriteBorder`, or `sprite_border`. The MCP will write the copied Sprite `.meta` `spriteBorder`, set the UGUI Image to Sliced, and verify the border during static prefab validation.
 

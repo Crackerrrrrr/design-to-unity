@@ -64,13 +64,13 @@ MCP_TRANSPORT=stdio DesignToUnity
 - `psd_design_convert_to_unity_prefab`
 - `psd_design_convert_export_to_unity_prefab`
 
-The PSD adapter parses local `.psd` / `.psb` files with `psd-tools`, exports layer PNGs, keeps text editable through `TextMeshProUGUI` by default, and emits component semantics for `Button`, `Slider`, `ProgressBar`, `Toggle`, `ToggleGroup` tabs/radio groups, `TMP_InputField`, `TMP_Dropdown`, `ScrollRect`, `Scrollbar`, rectangular `RectMask2D` clipping containers, and repeated-content `LayoutGroup` containers. Slider track/fill/handle, Toggle state graphic, tab/radio ToggleGroup membership/default selection, TMP input text/placeholder references, TMP dropdown caption/template/item references, mask/clip RectMask2D hints, ScrollRect viewport/content/scrollbar references, and Vertical/Horizontal/GridLayoutGroup hints are bound when the PSD layer structure can be inferred safely.
+The PSD adapter parses local `.psd` / `.psb` files with `psd-tools`, exports layer PNGs, keeps text editable through `TextMeshProUGUI` by default, and emits component semantics for `Button`, `Slider`, `ProgressBar`, `Toggle`, `ToggleGroup` tabs/radio groups, `TMP_InputField`, `TMP_Dropdown`, `ScrollRect`, `Scrollbar`, rectangular `RectMask2D` clipping containers, and repeated-content `LayoutGroup` containers. Slider track/fill/handle, Toggle state graphic, tab/radio ToggleGroup membership/default selection, TMP input text/placeholder references, TMP dropdown caption/template/item references, mask/clip RectMask2D hints, ScrollRect viewport/content/scrollbar references, and Vertical/Horizontal/GridLayoutGroup hints are bound when the PSD layer structure can be inferred safely. Text layers now carry font hints, line height, character spacing, rich text spans, and best-effort Photoshop stroke/drop-shadow mappings; the direct writer maps them to TMP rich text plus UGUI `Outline` / `Shadow` when present.
 
 It also exposes complex Photoshop feature risks in packet metadata and readiness reports, including masks, clipping, non-normal blend modes, smart objects, adjustment layers, and layer effects.
 
 For higher fidelity PSD flows, Photoshop or a UXP script can export `design.json`, `preview.png`, and `assets/*.png`; call `psd_design_prepare_export_packet` or `psd_design_convert_export_to_unity_prefab` to reuse the same Unity plan, prefab writer, source map, readiness report, and visual diff tools.
 
-A starter Photoshop UXP exporter lives in [templates/photoshop-uxp-exporter](templates/photoshop-uxp-exporter). Load that folder with Adobe UXP Developer Tool, export the active PSD, then pass the export folder to the MCP tools below. The exporter writes `rasterized: true` for Photoshop-rendered complex groups so the MCP treats them as one trusted PNG instead of duplicating child layers.
+A starter Photoshop UXP exporter lives in [templates/photoshop-uxp-exporter](templates/photoshop-uxp-exporter). Load that folder with Adobe UXP Developer Tool, export the active PSD, then pass the export folder to the MCP tools below. The exporter writes `rasterized: true` for Photoshop-rendered complex groups so the MCP treats them as one trusted PNG instead of duplicating child layers. It also exports editable text style data when Photoshop exposes it, including `textStyleRange` spans, font family/style/weight, line height, character spacing, stroke, and drop shadow.
 
 Photoshop/UXP manifests can explicitly provide nine-slice data on a layer with `nine_slice`, `nineSlice`, `spriteBorder`, or `sprite_border`. When a border is present, the direct Unity writer sets the copied Sprite `.meta` `spriteBorder`, emits a sliced UGUI `Image`, preserves the border in the source map, and the static verifier checks the meta border against the source map.
 
@@ -105,7 +105,7 @@ After direct YAML generation, call:
 psd_design_verify_unity_prefab_yaml(unity_project_path, prefab_asset_path, source_map_asset_path)
 ```
 
-The verifier checks the generated prefab/source-map pair before Unity import. It catches missing files, broken local fileID references, sprite meta GUID mismatches, nine-slice spriteBorder mismatches, source-map count mismatches, LayoutGroup count mismatches, and unbound Slider/Button/Toggle/ToggleGroup tab/radio/TMP_InputField/TMP_Dropdown/ScrollRect references that need review.
+The verifier checks the generated prefab/source-map pair before Unity import. It catches missing files, broken local fileID references, sprite meta GUID mismatches, nine-slice spriteBorder mismatches, source-map count mismatches, LayoutGroup and text effect component count mismatches, and unbound Slider/Button/Toggle/ToggleGroup tab/radio/TMP_InputField/TMP_Dropdown/ScrollRect references that need review.
 
 To validate the imported prefab inside Unity, install the optional Editor script:
 
@@ -113,7 +113,7 @@ To validate the imported prefab inside Unity, install the optional Editor script
 psd_design_install_unity_editor_validator(unity_project_path)
 ```
 
-Unity will then expose `Tools/Design To Unity/Validate Selected Prefab`, plus a batchmode entry point: `DesignToUnityPrefabValidator.ValidateFromCommandLine`. The Unity-side report checks imported component counts against `unity_import_manifest.expected_components`, source map import, Sprite references, TMP fonts, Button target graphics, Slider bindings, Toggle target/state graphics, ToggleGroup tab/radio membership, TMP_InputField text bindings, TMP_Dropdown template/text bindings, ScrollRect bindings, Scrollbar handle/target bindings, and LayoutGroup component counts.
+Unity will then expose `Tools/Design To Unity/Validate Selected Prefab`, plus a batchmode entry point: `DesignToUnityPrefabValidator.ValidateFromCommandLine`. The Unity-side report checks imported component counts against `unity_import_manifest.expected_components`, source map import, Sprite references, TMP fonts, TMP text effect components, Button target graphics, Slider bindings, Toggle target/state graphics, ToggleGroup tab/radio membership, TMP_InputField text bindings, TMP_Dropdown template/text bindings, ScrollRect bindings, Scrollbar handle/target bindings, and LayoutGroup component counts.
 
 The same installed Editor script also exposes `DesignToUnityPrefabValidator.CapturePrefabFromCommandLine`, which renders the generated prefab to a PNG. Feed that PNG to `psd_design_compare_unity_screenshot` for the automated visual QA loop.
 
@@ -142,7 +142,7 @@ It compares the Unity screenshot with the flattened PSD reference, writes a diff
 
 - copied sprite files under a Unity `Assets/...` folder
 - generated `.png.meta` files with deterministic GUIDs
-- a `.prefab` YAML file containing `GameObject`, `RectTransform`, `CanvasRenderer`, `Image`, `TextMeshProUGUI`, `Button`, `Slider`, `Toggle`, `ToggleGroup`, `TMP_InputField`, `TMP_Dropdown`, `ScrollRect`, `Scrollbar`, `RectMask2D`, `VerticalLayoutGroup`, `HorizontalLayoutGroup`, `GridLayoutGroup`, and `CanvasGroup` components
+- a `.prefab` YAML file containing `GameObject`, `RectTransform`, `CanvasRenderer`, `Image`, `TextMeshProUGUI`, `Outline`, `Shadow`, `Button`, `Slider`, `Toggle`, `ToggleGroup`, `TMP_InputField`, `TMP_Dropdown`, `ScrollRect`, `Scrollbar`, `RectMask2D`, `VerticalLayoutGroup`, `HorizontalLayoutGroup`, `GridLayoutGroup`, and `CanvasGroup` components
 - a `.prefab.meta` file when needed
 - a sibling `*.design-to-unity.json` source map for node ids, source paths, content hashes, component fileIDs, and inferred bindings
 - a Unity import manifest inside the source map with expected component counts, validation gates, and reimport/update policy hints
@@ -168,7 +168,7 @@ The PSD pipeline has been smoke-tested with fake semantic PSD data and real loca
 
 - fake PSD coverage for editable TMP text, Button, Slider fill/handle binding, Toggle state binding, Tab and radio ToggleGroup binding, TMP_InputField text binding, TMP_Dropdown template/caption/item binding, mask_candidate RectMask2D, ScrollRect/Scrollbar/RectMask2D, VerticalLayoutGroup, CanvasGroup, and source map output
 - fake PSD coverage for mask, clipping, blend mode, smart object, and adjustment-layer warnings
-- fake Photoshop/UXP export coverage for `design.json`, preview reference, layer PNG assets, explicit nine-slice spriteBorder, TMP text, Button, Slider, Toggle, ToggleGroup tabs/radio groups, mask_candidate RectMask2D, Vertical/Horizontal/GridLayoutGroup, TMP_InputField, TMP_Dropdown, source map, readiness report, and visual diff
+- fake Photoshop/UXP export coverage for `design.json`, preview reference, layer PNG assets, explicit nine-slice spriteBorder, TMP text, rich text spans, TMP font asset mapping, Outline/Shadow text effects, Button, Slider, Toggle, ToggleGroup tabs/radio groups, mask_candidate RectMask2D, Vertical/Horizontal/GridLayoutGroup, TMP_InputField, TMP_Dropdown, source map, readiness report, and visual diff
 - Photoshop/UXP export validator coverage for schema, missing preview, missing layer asset, invalid bounds, and complex feature warnings
 - Unity Editor validator template coverage for install path, menu/command-line entry point, expected component checks, and TMP/UI component checks
 - real PSD atlas import from `/Users/shangfei/Downloads/75-76/75/图集/旧.psd`

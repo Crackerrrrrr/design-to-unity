@@ -1371,6 +1371,98 @@ class PsdPipelineTest(unittest.TestCase):
             self.assertEqual(source_map["unity_import_manifest"]["expected_components"]["GridLayoutGroup"], 1)
             self.assertEqual(verification["status"], "pass")
 
+    def test_photoshop_export_complex_text_writes_tmp_effects_and_rich_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            export_dir = tmp_path / "uxp_text"
+            export_dir.mkdir(parents=True)
+            _save_image(export_dir / "preview.png", (260, 120), (20, 30, 40, 255))
+            manifest = {
+                "document": {
+                    "name": "TextPanel",
+                    "width": 260,
+                    "height": 120,
+                    "preview": "preview.png",
+                    "layers": [
+                        {
+                            "id": "headline",
+                            "name": "Headline",
+                            "kind": "type",
+                            "bounds": {"x": 20, "y": 24, "width": 220, "height": 48},
+                            "text": {
+                                "content": "Gold VIP",
+                                "fontFamily": "Inter-Bold",
+                                "fontStyle": "Bold Italic",
+                                "fontSize": 28,
+                                "lineHeight": 34,
+                                "letterSpacing": 1.5,
+                                "color": "#FFE680",
+                                "alignment": "center",
+                                "tmpFontAssetGuid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                "spans": [
+                                    {"start": 0, "length": 4, "color": "#FFE680", "fontStyle": "Bold"},
+                                    {"start": 5, "length": 3, "color": "#80D8FF", "fontStyle": "Italic", "fontSize": 24},
+                                ],
+                                "stroke": {"width": 2, "color": "#3A1600"},
+                                "dropShadow": {"color": "rgba(0,0,0,0.65)", "offset": {"x": 2, "y": -3}},
+                            },
+                        },
+                        {
+                            "id": "mapped_label",
+                            "name": "MappedLabel",
+                            "kind": "type",
+                            "bounds": {"x": 20, "y": 78, "width": 220, "height": 24},
+                            "text": {
+                                "content": "Mapped",
+                                "fontFamily": "Inter-Bold",
+                                "fontStyle": "Bold Italic",
+                                "fontSize": 18,
+                                "color": "#FFFFFF",
+                            },
+                        }
+                    ],
+                }
+            }
+            (export_dir / "design.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+            packet = make_photoshop_export_packet(str(export_dir))
+            text_node = next(node for node in _walk_packet_nodes(packet) if node.get("name") == "Headline")
+            self.assertTrue(text_node["unity_text_hint"]["rich_text_enabled"])
+            self.assertTrue(text_node["unity_text_hint"]["uses_outline_component"])
+            self.assertTrue(text_node["unity_text_hint"]["uses_shadow_component"])
+            self.assertEqual(text_node["text"]["font_hint"]["tmp_font_asset_guid"], "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+            unity_root = tmp_path / "UnityProject"
+            (unity_root / "Assets").mkdir(parents=True)
+            result = write_unity_prefab_yaml(
+                packet,
+                str(unity_root),
+                prefab_name="UXP_Text_Test",
+                tmp_font_asset_map={"Inter-Bold Bold Italic": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+            )
+            verification = verify_unity_prefab_yaml(str(unity_root), result["prefab_asset_path"], result["source_map_asset_path"])
+            prefab_text = Path(result["prefab_path"]).read_text(encoding="utf-8")
+            source_map = json.loads(Path(result["source_map_path"]).read_text(encoding="utf-8"))
+            mapped_text = next(node for node in source_map["nodes"] if node.get("name") == "Headline")
+            self.assertEqual(result["tmp_font_asset_map_count"], 1)
+            self.assertEqual(result["outline_node_count"], 1)
+            self.assertEqual(result["shadow_node_count"], 1)
+            self.assertIn("outline", mapped_text["component_file_ids"])
+            self.assertIn("shadow", mapped_text["component_file_ids"])
+            self.assertEqual(source_map["unity_import_manifest"]["expected_components"]["Outline"], 1)
+            self.assertEqual(source_map["unity_import_manifest"]["expected_components"]["Shadow"], 1)
+            self.assertIn("guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", prefab_text)
+            self.assertIn("guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", prefab_text)
+            self.assertIn("<color=#FFE680><b>Gold</b></color> ", prefab_text)
+            self.assertIn("<color=#80D8FF><size=24.0><i>VIP</i></size></color>", prefab_text)
+            self.assertIn("m_fontStyle: 3", prefab_text)
+            self.assertIn("m_characterSpacing: 1.5", prefab_text)
+            self.assertIn("guid: e19747de3f5aca642ab2be37e372fb86", prefab_text)
+            self.assertIn("guid: cfabb0440166ab443bba8876756fdfa9", prefab_text)
+            self.assertIn("m_EffectDistance: {x: 2.0, y: -2.0}", prefab_text)
+            self.assertIn("m_EffectDistance: {x: 2.0, y: -3.0}", prefab_text)
+            self.assertEqual(verification["status"], "pass")
+
     def test_unity_prefab_verifier_detects_broken_sprite_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

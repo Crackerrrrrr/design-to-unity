@@ -1175,6 +1175,10 @@ async def lanhu_design_write_unity_prefab_yaml(
         str | None,
         "Optional TMP Font Asset guid. If omitted, the writer tries project Assets first, then uses a package fallback guid.",
     ] = None,
+    tmp_font_asset_map_json: Annotated[
+        str | None,
+        "Optional JSON object mapping Photoshop font names/styles to TMP Font Asset guids.",
+    ] = None,
 ) -> dict[str, Any]:
     """
     Experimentally write a Unity UGUI prefab by generating Unity YAML directly.
@@ -1206,6 +1210,7 @@ async def lanhu_design_write_unity_prefab_yaml(
         add_layout_components=add_layout_components,
         add_canvas_group_components=add_canvas_group_components,
         tmp_font_asset_guid=tmp_font_asset_guid,
+        tmp_font_asset_map=tmp_font_asset_map_json,
     )
     prefab_result["verification"] = _verify_prefab_result(prefab_result)
     return prefab_result
@@ -1634,6 +1639,10 @@ async def psd_design_convert_export_to_unity_prefab(
         str | None,
         "Optional TMP Font Asset guid. If omitted, the writer tries project Assets first, then uses a package fallback guid.",
     ] = None,
+    tmp_font_asset_map_json: Annotated[
+        str | None,
+        "Optional JSON object mapping Photoshop font names/styles to TMP Font Asset guids.",
+    ] = None,
 ) -> dict[str, Any]:
     """
     One-step Photoshop/UXP export to Unity prefab conversion.
@@ -1667,6 +1676,7 @@ async def psd_design_convert_export_to_unity_prefab(
         add_layout_components=add_layout_components,
         add_canvas_group_components=add_canvas_group_components,
         tmp_font_asset_guid=tmp_font_asset_guid,
+        tmp_font_asset_map=tmp_font_asset_map_json,
     )
     prefab_verification = _verify_prefab_result(prefab_result)
     root = packet["nodes"][0]
@@ -1756,6 +1766,10 @@ async def psd_design_convert_to_unity_prefab(
         str | None,
         "Optional TMP Font Asset guid. If omitted, the writer tries project Assets first, then uses a package fallback guid.",
     ] = None,
+    tmp_font_asset_map_json: Annotated[
+        str | None,
+        "Optional JSON object mapping Photoshop font names/styles to TMP Font Asset guids.",
+    ] = None,
 ) -> dict[str, Any]:
     """
     One-step PSD to Unity prefab conversion.
@@ -1803,6 +1817,7 @@ async def psd_design_convert_to_unity_prefab(
         add_layout_components=add_layout_components,
         add_canvas_group_components=add_canvas_group_components,
         tmp_font_asset_guid=tmp_font_asset_guid,
+        tmp_font_asset_map=tmp_font_asset_map_json,
     )
     prefab_verification = _verify_prefab_result(prefab_result)
     root = packet["nodes"][0]
@@ -1865,6 +1880,10 @@ async def psd_design_write_unity_prefab_yaml(
         str | None,
         "Optional TMP Font Asset guid. If omitted, the writer tries project Assets first, then uses a package fallback guid.",
     ] = None,
+    tmp_font_asset_map_json: Annotated[
+        str | None,
+        "Optional JSON object mapping Photoshop font names/styles to TMP Font Asset guids.",
+    ] = None,
 ) -> dict[str, Any]:
     """
     Experimentally write a Unity UGUI prefab from a PSD packet by generating Unity YAML directly.
@@ -1893,6 +1912,7 @@ async def psd_design_write_unity_prefab_yaml(
         add_layout_components=add_layout_components,
         add_canvas_group_components=add_canvas_group_components,
         tmp_font_asset_guid=tmp_font_asset_guid,
+        tmp_font_asset_map=tmp_font_asset_map_json,
     )
     prefab_result["verification"] = _verify_prefab_result(prefab_result)
     return prefab_result
