@@ -422,7 +422,7 @@ def _register_asset(
             "type": "image",
             "remote_url": remote_url,
             "local_path": None,
-            "suggested_unity_path": f"Assets/DesignHandoff/Sprites/{file_stem}{ext}",
+            "suggested_unity_path": f"Assets/DesignToUnity/Sprites/{file_stem}{ext}",
             "format": ext.lstrip("."),
             "size": None,
             "logical_size": {"width": rect["width"], "height": rect["height"]},
@@ -460,18 +460,198 @@ def _apply_semantics(node: dict[str, Any], design_info: dict[str, Any]) -> None:
     node_type = node.get("type")
     candidates: list[dict[str, Any]] = []
 
+    component_canvas = screen_w <= 512 and screen_h <= 256
     strong_button_tokens = ("btn", "button", "按钮")
-    action_button_tokens = ("confirm", "submit", "cancel", "取消", "ok", "play", "start")
-    button_like_rect = 2.0 <= aspect <= 8.0 and 28 <= height <= 120 and width >= 80 and area_ratio <= 0.2
-    if _has_token(name, strong_button_tokens) or (
-        node_type in {"image", "shape", "group"} and button_like_rect and _has_token(name, action_button_tokens)
-    ):
+    action_button_tokens = (
+        "confirm",
+        "submit",
+        "cancel",
+        "ok",
+        "play",
+        "start",
+        "close",
+        "开始",
+        "确定",
+        "确认",
+        "取消",
+        "关闭",
+        "继续",
+        "领取",
+    )
+    button_like_rect = (
+        2.0 <= aspect <= 8.0
+        and 28 <= height <= 120
+        and width >= 80
+        and (area_ratio <= 0.2 or component_canvas)
+    )
+    action_button = node_type in {"image", "shape", "group"} and button_like_rect and _has_token(name, action_button_tokens)
+    if _has_token(name, strong_button_tokens) or action_button:
         reasons = []
         if _has_token(name, strong_button_tokens):
             reasons.append("name/action text suggests button")
         if button_like_rect:
             reasons.append("rect has button-like aspect and height")
-        _add_semantic(candidates, "button_candidate", 0.86 if _has_token(name, strong_button_tokens) else 0.62, reasons)
+        confidence = 0.88 if action_button and component_canvas else 0.86 if _has_token(name, strong_button_tokens) else 0.62
+        _add_semantic(candidates, "button_candidate", confidence, reasons)
+
+    scrollbar_tokens = ("scrollbar", "scroll_bar", "scroll bar", "滚动条")
+    scrollbar_handle_tokens = ("handle", "thumb", "knob", "滑块", "滑柄")
+    if node_type in {"image", "shape", "group"} and _has_token(name, scrollbar_tokens):
+        if _has_token(name, scrollbar_handle_tokens):
+            _add_semantic(candidates, "scrollbar_handle_candidate", 0.92, ["name suggests scrollbar handle"])
+        else:
+            _add_semantic(candidates, "scrollbar_candidate", 0.9, ["name suggests scrollbar"])
+
+    slider_tokens = ("slider", "slide", "thumb", "handle", "滑块", "拖动")
+    progress_tokens = ("progress", "progressbar", "progress_bar", "loading", "percent", "percentage", "bar", "hp", "health", "exp", "xp", "energy", "stamina", "进度", "进度条", "加载", "血条", "生命", "经验", "能量", "体力")
+    bar_like_rect = aspect >= 3.0 and 6 <= height <= 80 and width >= 60 and area_ratio <= 0.12
+    if node_type in {"image", "shape", "group"} and (_has_token(name, slider_tokens) or _has_token(text, slider_tokens)):
+        reasons = ["name/text suggests slider"]
+        if bar_like_rect:
+            reasons.append("rect has horizontal control-like proportions")
+        _add_semantic(candidates, "slider_candidate", 0.84 if bar_like_rect else 0.72, reasons)
+    elif node_type in {"image", "shape", "group"} and (
+        _has_token(name, progress_tokens) or _has_token(text, progress_tokens)
+    ):
+        reasons = ["name/text suggests progress bar"]
+        if bar_like_rect:
+            reasons.append("rect has progress-bar-like proportions")
+        _add_semantic(candidates, "progress_candidate", 0.8 if bar_like_rect else 0.66, reasons)
+    elif node_type in {"image", "shape"} and bar_like_rect and y >= screen_h * 0.08:
+        _add_semantic(candidates, "progress_candidate", 0.54, ["rect is a wide thin bar"])
+
+    toggle_tokens = (
+        "toggle",
+        "switch",
+        "checkbox",
+        "check_box",
+        "勾选",
+        "复选",
+        "开关",
+    )
+    toggle_part_tokens = (
+        "track",
+        "bg",
+        "background",
+        "fill",
+        "checkmark",
+        "tick",
+        "knob",
+        "thumb",
+        "handle",
+        "状态",
+        "圆点",
+    )
+    toggle_like_rect = node_type in {"image", "shape", "group"} and width <= max(180, screen_w * 0.22) and height <= max(96, screen_h * 0.16)
+    toggle_part = node_type in {"image", "shape"} and _has_token(name, toggle_part_tokens)
+    if node_type in {"image", "shape", "group"} and not toggle_part and (_has_token(name, toggle_tokens) or _has_token(text, toggle_tokens)):
+        reasons = ["name/text suggests toggle"]
+        if toggle_like_rect:
+            reasons.append("rect has toggle/checkbox-like size")
+        _add_semantic(candidates, "toggle_candidate", 0.86 if toggle_like_rect else 0.72, reasons)
+
+    radio_group_tokens = (
+        "radiogroup",
+        "radio_group",
+        "radio-group",
+        "radio group",
+        "radiooptions",
+        "radio_options",
+        "radio-options",
+        "radio options",
+        "choicegroup",
+        "choice_group",
+        "choice-group",
+        "choice group",
+        "单选组",
+        "单选列表",
+        "选项组",
+    )
+    radio_item_tokens = (
+        "radio_",
+        "_radio",
+        "radio-",
+        "-radio",
+        "radio",
+        "choice_",
+        "_choice",
+        "choice-",
+        "-choice",
+        "单选",
+    )
+    if node_type == "group" and _has_token(name, radio_group_tokens):
+        _add_semantic(candidates, "radio_group_candidate", 0.88, ["name suggests radio group"])
+    elif node_type in {"image", "shape", "group"} and _has_token(name, radio_item_tokens):
+        _add_semantic(candidates, "radio_candidate", 0.78, ["name suggests radio option"])
+
+    tab_group_tokens = ("tabs", "tabbar", "tab_bar", "tabgroup", "tab_group", "页签", "标签栏")
+    tab_item_tokens = ("tab_", "_tab", "tab-", "-tab", "页签", "标签")
+    if node_type == "group" and _has_token(name, tab_group_tokens):
+        _add_semantic(candidates, "tab_group_candidate", 0.88, ["name suggests tab group"])
+    elif node_type in {"image", "shape", "group"} and _has_token(name, tab_item_tokens):
+        _add_semantic(candidates, "tab_candidate", 0.78, ["name suggests tab item"])
+
+    scroll_tokens = (
+        "scroll",
+        "scrollview",
+        "scroll_view",
+        "list",
+        "grid",
+        "滚动",
+        "滑动区域",
+        "列表",
+    )
+    scroll_like_rect = node_type == "group" and area_ratio >= 0.08 and (height >= screen_h * 0.25 or width >= screen_w * 0.35)
+    if node_type == "group" and (_has_token(name, scroll_tokens) or (_has_token(text, scroll_tokens) and scroll_like_rect)):
+        reasons = ["name/text suggests scrollable area"]
+        if scroll_like_rect:
+            reasons.append("group has scroll/list-like size")
+        _add_semantic(candidates, "scroll_area_candidate", 0.82 if _has_token(name, scroll_tokens) else 0.62, reasons)
+
+    input_tokens = (
+        "input",
+        "inputfield",
+        "textinput",
+        "textfield",
+        "text_field",
+        "search",
+        "username",
+        "password",
+        "email",
+        "placeholder",
+        "输入",
+        "文本框",
+        "搜索",
+        "昵称",
+        "账号",
+        "密码",
+        "邮箱",
+    )
+    input_like_rect = 2.5 <= aspect <= 12.0 and 24 <= height <= 96 and width >= 90 and area_ratio <= 0.18
+    if node_type in {"image", "shape", "group"} and (_has_token(name, input_tokens) or (_has_token(text, input_tokens) and input_like_rect)):
+        reasons = ["name/text suggests text input"]
+        if input_like_rect:
+            reasons.append("rect has input-field-like proportions")
+        _add_semantic(candidates, "input_candidate", 0.86 if input_like_rect else 0.72, reasons)
+
+    dropdown_tokens = (
+        "dropdown",
+        "drop_down",
+        "selectbox",
+        "select_box",
+        "picker",
+        "combo",
+        "combobox",
+        "下拉",
+        "选择器",
+        "选项框",
+    )
+    dropdown_like_rect = 2.0 <= aspect <= 10.0 and 24 <= height <= 96 and width >= 90 and area_ratio <= 0.2
+    if node_type in {"image", "shape", "group"} and (_has_token(name, dropdown_tokens) or (_has_token(text, dropdown_tokens) and dropdown_like_rect)):
+        reasons = ["name/text suggests dropdown"]
+        if dropdown_like_rect:
+            reasons.append("rect has dropdown-like proportions")
+        _add_semantic(candidates, "dropdown_candidate", 0.86 if dropdown_like_rect else 0.72, reasons)
 
     if _has_token(name, ("bg", "background", "背景", "backdrop", "底图")) or area_ratio >= 0.72:
         reasons = []
@@ -508,6 +688,10 @@ def _apply_semantics(node: dict[str, Any], design_info: dict[str, Any]) -> None:
     if node_type == "image" and _has_token(name, ("text", "文字", "label", "copy")):
         _add_semantic(candidates, "text_image_candidate", 0.76, ["image layer name suggests exported text"])
 
+    mask_tokens = ("mask", "clip", "clipping", "clip_rect", "cliprect", "裁剪", "蒙版", "遮罩")
+    if node_type in {"group", "image", "shape", "mask"} and _has_token(name, mask_tokens):
+        _add_semantic(candidates, "mask_candidate", 0.84, ["name suggests rectangular clipping/mask container"])
+
     centered_x = screen_w and abs((x + width / 2) - screen_w / 2) <= screen_w * 0.18
     centered_y = screen_h and abs((y + height / 2) - screen_h / 2) <= screen_h * 0.24
     if node_type in {"image", "group", "shape"} and 0.12 <= area_ratio <= 0.7 and (centered_x or _has_token(name, ("panel", "card", "面板", "框"))):
@@ -535,13 +719,198 @@ def _apply_semantics(node: dict[str, Any], design_info: dict[str, Any]) -> None:
     if node.get("semantic_type") == "button_candidate":
         node["unity_interaction_hint"] = {
             "can_add_button": True,
-            "default_add_button": False,
+            "default_add_button": True,
             "raycast_target_if_interactive": True,
+        }
+    if node.get("semantic_type") == "toggle_candidate":
+        toggle_value = _toggle_value_from_text(" ".join(part for part in (name, text) if part))
+        node["unity_interaction_hint"] = {
+            "can_add_toggle": True,
+            "default_add_toggle": True,
+            "raycast_target_if_interactive": True,
+        }
+        node["unity_toggle_hint"] = {
+            "can_add_toggle": True,
+            "default_add_toggle": True,
+            "value": toggle_value,
+            "graphic_node_id": None,
+            "requires_review": False,
+            "notes": [
+                "Toggle was inferred from source layer naming or text.",
+                "If graphic_node_id is empty, the Toggle component uses the target graphic as its state graphic.",
+            ],
+        }
+    if node.get("semantic_type") == "tab_group_candidate":
+        node["unity_tab_group_hint"] = {
+            "can_add_toggle_group": True,
+            "default_add_toggle_group": True,
+            "allow_switch_off": False,
+            "tab_node_ids": [],
+            "notes": [
+                "Tab group was inferred from source layer naming.",
+                "Child tab candidates should use Toggle.m_Group to reference this ToggleGroup.",
+            ],
+        }
+    if node.get("semantic_type") == "tab_candidate":
+        node["unity_interaction_hint"] = {
+            "can_add_toggle": True,
+            "default_add_toggle": True,
+            "raycast_target_if_interactive": True,
+        }
+        node["unity_tab_hint"] = {
+            "can_add_toggle": True,
+            "default_add_toggle": True,
+            "group_node_id": None,
+            "label_node_id": None,
+            "value": _toggle_value_from_text(" ".join(part for part in (name, text) if part)),
+            "requires_review": True,
+            "notes": [
+                "Tab item was inferred from source layer naming.",
+                "Bind a ToggleGroup when a parent tab group can be identified.",
+            ],
+        }
+    if node.get("semantic_type") == "radio_group_candidate":
+        node["unity_radio_group_hint"] = {
+            "can_add_toggle_group": True,
+            "default_add_toggle_group": True,
+            "allow_switch_off": False,
+            "radio_node_ids": [],
+            "notes": [
+                "Radio group was inferred from source layer naming.",
+                "Child radio candidates should use Toggle.m_Group to reference this ToggleGroup.",
+            ],
+        }
+    if node.get("semantic_type") == "radio_candidate":
+        node["unity_interaction_hint"] = {
+            "can_add_toggle": True,
+            "default_add_toggle": True,
+            "raycast_target_if_interactive": True,
+        }
+        node["unity_radio_hint"] = {
+            "can_add_toggle": True,
+            "default_add_toggle": True,
+            "group_node_id": None,
+            "label_node_id": None,
+            "value": _toggle_value_from_text(" ".join(part for part in (name, text) if part)),
+            "requires_review": True,
+            "notes": [
+                "Radio option was inferred from source layer naming.",
+                "Bind a ToggleGroup when a parent radio group can be identified.",
+            ],
+        }
+    if node.get("semantic_type") == "mask_candidate":
+        node["unity_mask_hint"] = {
+            "can_add_rect_mask_2d": True,
+            "default_add_rect_mask_2d": True,
+            "recommended_unity_component": "RectMask2D",
+            "requires_review": False,
+            "notes": [
+                "Mask candidate was inferred from source layer naming.",
+                "RectMask2D represents rectangular UI clipping only; Photoshop bitmap/vector masks still require visual QA or rasterized export.",
+            ],
+        }
+    if node.get("semantic_type") == "input_candidate":
+        text_child = _first_descendant_with_text(node)
+        placeholder_child = _first_placeholder_descendant(node) or text_child
+        node["unity_interaction_hint"] = {
+            "can_add_tmp_input_field": True,
+            "default_add_tmp_input_field": True,
+            "raycast_target_if_interactive": True,
+        }
+        node["unity_input_hint"] = {
+            "can_add_tmp_input_field": True,
+            "default_add_tmp_input_field": True,
+            "text_component_node_id": (text_child or {}).get("id"),
+            "placeholder_node_id": (placeholder_child or {}).get("id"),
+            "text": ((text_child or {}).get("text") or {}).get("content"),
+            "line_type": "single_line",
+            "requires_review": not bool(text_child),
+            "notes": [
+                "TMP_InputField was inferred from source layer naming or text.",
+                "Bind business validation and submit callbacks in Unity after import.",
+            ],
+        }
+    if node.get("semantic_type") == "dropdown_candidate":
+        caption_child = _first_descendant_with_text(node)
+        node["unity_interaction_hint"] = {
+            "can_add_tmp_dropdown": True,
+            "default_add_tmp_dropdown": True,
+            "raycast_target_if_interactive": True,
+        }
+        node["unity_dropdown_hint"] = {
+            "can_add_tmp_dropdown": True,
+            "default_add_tmp_dropdown": True,
+            "template_node_id": None,
+            "caption_text_node_id": (caption_child or {}).get("id"),
+            "item_text_node_id": None,
+            "options": [((caption_child or {}).get("text") or {}).get("content")] if caption_child else [],
+            "value": 0,
+            "requires_review": True,
+            "notes": [
+                "TMP_Dropdown was inferred from source layer naming or text.",
+                "Bind template/item references when an expanded menu or option list exists in the design.",
+            ],
+        }
+    if node.get("semantic_type") in {"progress_candidate", "slider_candidate"}:
+        node["unity_interaction_hint"] = {
+            "can_add_slider": True,
+            "default_add_slider": True,
+            "interactable": node.get("semantic_type") == "slider_candidate",
+            "requires_fill_handle_review": True,
+        }
+    if node.get("semantic_type") == "scroll_area_candidate":
+        node["unity_interaction_hint"] = {
+            "can_add_scroll_rect": True,
+            "default_add_scroll_rect": True,
+            "requires_content_viewport_review": True,
+        }
+    if node.get("semantic_type") == "scrollbar_candidate":
+        node["unity_interaction_hint"] = {
+            "can_add_scrollbar": True,
+            "default_add_scrollbar": True,
+            "requires_handle_review": True,
         }
 
 
 def _has_token(text: str, tokens: tuple[str, ...]) -> bool:
     return any(token in text for token in tokens)
+
+
+def _toggle_value_from_text(text: str) -> bool | None:
+    lowered = str(text or "").lower()
+    if _has_token(lowered, ("off", "unchecked", "uncheck", "disabled", "false", "关", "未选")):
+        return False
+    if _has_token(lowered, ("on", "checked", "check", "selected", "true", "开", "选中", "勾选")):
+        return True
+    return None
+
+
+def _first_descendant_with_text(node: dict[str, Any]) -> dict[str, Any] | None:
+    for child in node.get("children") or []:
+        if (child.get("text") or {}).get("content"):
+            return child
+        nested = _first_descendant_with_text(child)
+        if nested:
+            return nested
+    return None
+
+
+def _first_placeholder_descendant(node: dict[str, Any]) -> dict[str, Any] | None:
+    for child in node.get("children") or []:
+        haystack = " ".join(
+            str(part or "")
+            for part in (
+                child.get("name"),
+                child.get("path"),
+                (child.get("text") or {}).get("content"),
+            )
+        ).lower()
+        if _has_token(haystack, ("placeholder", "hint", "请输入", "输入", "占位")):
+            return child
+        nested = _first_placeholder_descendant(child)
+        if nested:
+            return nested
+    return None
 
 
 def _add_semantic(candidates: list[dict[str, Any]], semantic_type: str, confidence: float, reasons: list[str]) -> None:
@@ -615,11 +984,27 @@ def _enrich_assets(assets: dict[str, dict[str, Any]], root_node: dict[str, Any],
             role = "sprite"
             folder = "Sprites"
 
-        nine_slice_candidate = bool(is_button_like or is_panel_like)
+        existing_nine_slice_hint = asset.get("nine_slice_hint") if isinstance(asset.get("nine_slice_hint"), dict) else {}
+        existing_border = existing_nine_slice_hint.get("border")
+        nine_slice_candidate = bool(existing_nine_slice_hint.get("candidate") or existing_border or is_button_like or is_panel_like)
+        nine_slice_hint = {
+            "candidate": nine_slice_candidate,
+            "reason": existing_nine_slice_hint.get("reason")
+            or (
+                "explicit nine-slice border supplied by source export"
+                if existing_border
+                else "button/panel-like sprite may benefit from a project-specific nine-slice rule"
+                if nine_slice_candidate
+                else "not a strong nine-slice candidate"
+            ),
+            "requires_review": bool(existing_nine_slice_hint.get("requires_review", False if existing_border else nine_slice_candidate)),
+        }
+        if existing_border:
+            nine_slice_hint["border"] = existing_border
         asset.update(
             {
                 "safe_file_name": asset.get("file_name"),
-                "suggested_unity_folder": f"Assets/DesignHandoff/{folder}",
+                "suggested_unity_folder": f"Assets/DesignToUnity/{folder}",
                 "asset_role": role,
                 "used_by_node_ids": [node.get("id") for node in nodes],
                 "used_by_node_paths": [node.get("path") for node in nodes],
@@ -631,13 +1016,7 @@ def _enrich_assets(assets: dict[str, dict[str, Any]], root_node: dict[str, Any],
                 "area_ratio": round(area_ratio, 4),
                 "aspect_ratio": round(aspect, 4) if aspect else None,
                 "duplicate_of": None,
-                "nine_slice_hint": {
-                    "candidate": nine_slice_candidate,
-                    "reason": "button/panel-like sprite may benefit from a project-specific nine-slice rule"
-                    if nine_slice_candidate
-                    else "not a strong nine-slice candidate",
-                    "requires_review": nine_slice_candidate,
-                },
+                "nine_slice_hint": nine_slice_hint,
             }
         )
 

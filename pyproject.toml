@@ -3,23 +3,28 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "funplay-lanhu-game-mcp"
+name = "design-to-unity"
 version = "0.1.0"
-description = "MCP server that turns Lanhu design pages into platform-neutral design handoff packets."
+description = "MCP server that turns design sources into Unity-ready design implementation packets and prefabs."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "fastmcp>=2.0.0",
   "httpx>=0.27.0",
+  "Pillow>=10.0.0",
+  "psd-tools>=1.10.0",
   "python-dotenv>=1.0.0"
 ]
 
 [project.scripts]
-FunPlayLanhuGameMcp = "design_handoff_mcp.server:main"
-funplay-lanhu-game-mcp = "design_handoff_mcp.server:main"
+DesignToUnity = "design_handoff_mcp.server:main"
+design-to-unity = "design_handoff_mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+design_handoff_mcp = ["templates/unity_editor/*.cs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

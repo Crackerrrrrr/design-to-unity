@@ -235,7 +235,7 @@ class LanhuClient:
 
     async def _fetch_dds_schema(self, version_id: str) -> dict[str, Any]:
         headers = {
-            "User-Agent": "Mozilla/5.0 DesignHandoffMCP/0.1",
+            "User-Agent": "Mozilla/5.0 DesignToUnity/0.1",
             "Accept": "application/json, text/plain, */*",
             "Referer": f"{self.settings.dds_base_url}/",
         }
