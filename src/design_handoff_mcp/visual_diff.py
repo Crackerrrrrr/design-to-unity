@@ -26,10 +26,11 @@ def compare_packet_reference_to_screenshot(
         raise VisualDiffError("Visual diff requires Pillow.") from exc
 
     reference_asset = _reference_asset(packet)
+    provider_label = _provider_label(packet)
     reference_path = Path(str(reference_asset.get("local_path") or "")).expanduser()
     screenshot = Path(screenshot_path).expanduser()
     if not reference_path.exists():
-        raise FileNotFoundError(f"PSD reference image not found: {reference_path}")
+        raise FileNotFoundError(f"{provider_label} reference image not found: {reference_path}")
     if not screenshot.exists():
         raise FileNotFoundError(f"Unity screenshot not found: {screenshot}")
 
@@ -52,7 +53,7 @@ def compare_packet_reference_to_screenshot(
             {
                 "code": "screenshot_resized",
                 "severity": "low",
-                "message": "Unity screenshot size differed from the PSD reference and was resized before comparison.",
+                "message": f"Unity screenshot size differed from the {provider_label} reference and was resized before comparison.",
                 "reference_size": {"width": reference_size[0], "height": reference_size[1]},
                 "screenshot_size": {"width": screenshot_size[0], "height": screenshot_size[1]},
             }
@@ -136,7 +137,7 @@ def compare_packet_reference_to_screenshot(
             "mismatch_ratio": round(chosen["mismatch_ratio"], 6),
         },
         "warnings": warnings,
-        "usage_note": "Use this after Unity MCP captures the generated prefab or scene. Fail does not always mean the prefab is unusable; inspect the diff image and review PSD warnings.",
+        "usage_note": f"Use this after Unity MCP captures the generated prefab or scene. Fail does not always mean the prefab is unusable; inspect the diff image and review {provider_label} warnings.",
     }
     report_path.write_text(_json_dumps(result), encoding="utf-8")
     return result
@@ -194,7 +195,20 @@ def _reference_asset(packet: dict[str, Any]) -> dict[str, Any]:
     for asset in packet.get("assets") or []:
         if asset.get("usage") == "design_reference":
             return asset
-    raise VisualDiffError("Packet has no PSD reference image. Prepare the PSD packet with include_reference=True.")
+    raise VisualDiffError(f"Packet has no {_provider_label(packet)} reference image. Prepare the packet with a preview/reference asset before running visual diff.")
+
+
+def _provider_label(packet: dict[str, Any]) -> str:
+    provider = str((packet.get("source") or {}).get("provider") or "design").strip().lower()
+    if provider == "psd":
+        return "PSD"
+    if provider == "figma":
+        return "Figma"
+    if provider == "lanhu":
+        return "Lanhu"
+    if provider == "photoshop_export":
+        return "Photoshop export"
+    return "design"
 
 
 def _needs_review_reason(packet: dict[str, Any], reference_asset: dict[str, Any]) -> str | None:

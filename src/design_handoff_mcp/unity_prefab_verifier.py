@@ -10,6 +10,7 @@ from .unity_yaml_writer import (
     GRID_LAYOUT_GROUP_SCRIPT_GUID,
     HORIZONTAL_LAYOUT_GROUP_SCRIPT_GUID,
     IMAGE_SCRIPT_GUID,
+    LAYOUT_ELEMENT_SCRIPT_GUID,
     OUTLINE_SCRIPT_GUID,
     RECT_MASK_2D_SCRIPT_GUID,
     SCROLLBAR_SCRIPT_GUID,
@@ -160,6 +161,7 @@ def _source_counts(source_map: dict[str, Any], errors: list[dict[str, Any]], war
         "vertical_layout_group_node_count": int(stats.get("vertical_layout_group_node_count") or 0),
         "horizontal_layout_group_node_count": int(stats.get("horizontal_layout_group_node_count") or 0),
         "grid_layout_group_node_count": int(stats.get("grid_layout_group_node_count") or 0),
+        "layout_element_node_count": int(stats.get("layout_element_node_count") or 0),
         "outline_node_count": int(stats.get("outline_node_count") or 0),
         "shadow_node_count": int(stats.get("shadow_node_count") or 0),
         "canvas_group_node_count": int(stats.get("canvas_group_node_count") or 0),
@@ -193,6 +195,7 @@ def _yaml_counts(prefab_text: str) -> dict[str, int]:
         "vertical_layout_group_node_count": prefab_text.count(f"guid: {VERTICAL_LAYOUT_GROUP_SCRIPT_GUID}"),
         "horizontal_layout_group_node_count": prefab_text.count(f"guid: {HORIZONTAL_LAYOUT_GROUP_SCRIPT_GUID}"),
         "grid_layout_group_node_count": prefab_text.count(f"guid: {GRID_LAYOUT_GROUP_SCRIPT_GUID}"),
+        "layout_element_node_count": prefab_text.count(f"guid: {LAYOUT_ELEMENT_SCRIPT_GUID}"),
         "outline_node_count": prefab_text.count(f"guid: {OUTLINE_SCRIPT_GUID}"),
         "shadow_node_count": prefab_text.count(f"guid: {SHADOW_SCRIPT_GUID}"),
         "canvas_group_node_count": len(re.findall(r"^--- !u!225 &", prefab_text, re.MULTILINE)),
@@ -217,6 +220,7 @@ def _compare_counts(source_counts: dict[str, int], yaml_counts: dict[str, int], 
         ("vertical_layout_group_node_count", "vertical_layout_group_node_count"),
         ("horizontal_layout_group_node_count", "horizontal_layout_group_node_count"),
         ("grid_layout_group_node_count", "grid_layout_group_node_count"),
+        ("layout_element_node_count", "layout_element_node_count"),
         ("outline_node_count", "outline_node_count"),
         ("shadow_node_count", "shadow_node_count"),
         ("canvas_group_node_count", "canvas_group_node_count"),
@@ -266,6 +270,7 @@ def _verify_import_manifest(
         "VerticalLayoutGroup": "vertical_layout_group_node_count",
         "HorizontalLayoutGroup": "horizontal_layout_group_node_count",
         "GridLayoutGroup": "grid_layout_group_node_count",
+        "LayoutElement": "layout_element_node_count",
         "Outline": "outline_node_count",
         "Shadow": "shadow_node_count",
         "CanvasGroup": "canvas_group_node_count",
@@ -342,7 +347,8 @@ def _verify_sprite_assets(
         if not file_name:
             errors.append({"code": "source_map_asset_missing_file_name", "asset_ref": asset.get("asset_ref"), "message": "Source map asset has a Unity guid but no file_name."})
             continue
-        sprite_path = project_root / sprite_asset_dir / file_name
+        deduped_asset_path = str(asset.get("deduped_unity_asset_path") or "").strip("/")
+        sprite_path = project_root / deduped_asset_path if deduped_asset_path.startswith("Assets/") else project_root / sprite_asset_dir / file_name
         meta_path = sprite_path.with_suffix(sprite_path.suffix + ".meta")
         if not sprite_path.is_file():
             errors.append({"code": "sprite_file_missing", "asset_ref": asset.get("asset_ref"), "message": f"Sprite file not found: {sprite_path}"})

@@ -31,6 +31,14 @@ class Settings:
     debug: bool
     lanhu_base_url: str = "https://lanhuapp.com"
     dds_base_url: str = "https://dds.lanhuapp.com"
+    figma_token: str = ""
+    figma_oauth_token: str = ""
+    figma_base_url: str = "https://api.figma.com"
+    figma_asset_scale: float = 1.0
+    figma_export_format: str = "png"
+    unity_tmp_font_asset_guid: str = ""
+    unity_tmp_font_asset_map_json: str = ""
+    unity_tmp_font_asset_map_path: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -49,6 +57,14 @@ class Settings:
             default_image_scale=os.getenv("DEFAULT_IMAGE_SCALE", "2x"),
             max_nodes_per_response=int(os.getenv("MAX_NODES_PER_RESPONSE", "200")),
             debug=_bool_env("DEBUG"),
+            figma_token=os.getenv("FIGMA_TOKEN", ""),
+            figma_oauth_token=os.getenv("FIGMA_OAUTH_TOKEN", ""),
+            figma_base_url=os.getenv("FIGMA_BASE_URL", "https://api.figma.com").rstrip("/"),
+            figma_asset_scale=float(os.getenv("FIGMA_ASSET_SCALE", "1")),
+            figma_export_format=os.getenv("FIGMA_EXPORT_FORMAT", "png").strip().lower(),
+            unity_tmp_font_asset_guid=os.getenv("UNITY_TMP_FONT_ASSET_GUID", "").strip(),
+            unity_tmp_font_asset_map_json=os.getenv("UNITY_TMP_FONT_ASSET_MAP_JSON", "").strip(),
+            unity_tmp_font_asset_map_path=os.getenv("UNITY_TMP_FONT_ASSET_MAP_PATH", "").strip(),
         )
 
     def ensure_dirs(self) -> None:

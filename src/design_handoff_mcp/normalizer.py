@@ -10,6 +10,38 @@ from .lanhu_client import LanhuUrl
 from .profiles import build_handoff_profiles
 
 
+_REUSABLE_COMPONENT_SEMANTICS = {
+    "button_candidate",
+    "progress_candidate",
+    "slider_candidate",
+    "toggle_candidate",
+    "tab_candidate",
+    "radio_candidate",
+    "input_candidate",
+    "dropdown_candidate",
+    "scroll_area_candidate",
+    "scrollbar_candidate",
+    "mask_candidate",
+}
+_REUSABLE_STRUCTURAL_SEMANTICS = {
+    "icon_candidate",
+    "text_image_candidate",
+    "panel_candidate",
+    "dialog_candidate",
+    "list_item_candidate",
+    "manual_prefab_candidate",
+    "tab_group_candidate",
+    "radio_group_candidate",
+    "scroll_viewport_candidate",
+    "scroll_content_candidate",
+}
+_NON_REUSABLE_SEMANTICS = {
+    "screen_root",
+    "background_candidate",
+    "ignored_by_designer",
+}
+
+
 def make_packet(
     parsed_url: LanhuUrl,
     design: dict[str, Any],
@@ -66,6 +98,7 @@ def make_packet(
             root_node["children"].append(node)
 
     _enrich_assets(asset_registry, root_node, design_info)
+    enrich_delivery_metadata(root_node, design_info, asset_registry, provider="lanhu")
     assets = list(asset_registry.values())
     packet_id = _packet_id(parsed_url.project_id, design.get("id"), version_id)
     packet = {
@@ -87,6 +120,7 @@ def make_packet(
         "target": target,
         "warnings": warnings,
     }
+    attach_reusable_prefab_registry(packet)
     return packet
 
 
@@ -986,21 +1020,29 @@ def _enrich_assets(assets: dict[str, dict[str, Any]], root_node: dict[str, Any],
 
         existing_nine_slice_hint = asset.get("nine_slice_hint") if isinstance(asset.get("nine_slice_hint"), dict) else {}
         existing_border = existing_nine_slice_hint.get("border")
+        inferred_border = None if existing_border else _infer_figma_nine_slice_border(asset, nodes, width, height)
         nine_slice_candidate = bool(existing_nine_slice_hint.get("candidate") or existing_border or is_button_like or is_panel_like)
+        if inferred_border:
+            nine_slice_candidate = True
         nine_slice_hint = {
             "candidate": nine_slice_candidate,
             "reason": existing_nine_slice_hint.get("reason")
             or (
                 "explicit nine-slice border supplied by source export"
                 if existing_border
+                else "inferred from Figma corner radius / stroke for a stretchable UI sprite"
+                if inferred_border
                 else "button/panel-like sprite may benefit from a project-specific nine-slice rule"
                 if nine_slice_candidate
                 else "not a strong nine-slice candidate"
             ),
-            "requires_review": bool(existing_nine_slice_hint.get("requires_review", False if existing_border else nine_slice_candidate)),
+            "requires_review": bool(existing_nine_slice_hint.get("requires_review", False if (existing_border or inferred_border) else nine_slice_candidate)),
         }
         if existing_border:
             nine_slice_hint["border"] = existing_border
+        elif inferred_border:
+            nine_slice_hint["border"] = inferred_border
+            nine_slice_hint["source"] = "figma_style_inference"
         asset.update(
             {
                 "safe_file_name": asset.get("file_name"),
@@ -1019,6 +1061,1026 @@ def _enrich_assets(assets: dict[str, dict[str, Any]], root_node: dict[str, Any],
                 "nine_slice_hint": nine_slice_hint,
             }
         )
+
+
+def _infer_figma_nine_slice_border(
+    asset: dict[str, Any],
+    nodes: list[dict[str, Any]],
+    width: float,
+    height: float,
+) -> dict[str, float] | None:
+    if asset.get("source_provider") != "figma" or not width or not height:
+        return None
+    if asset.get("usage") == "design_reference" or asset.get("is_large_background"):
+        return None
+    source_node = next((node for node in nodes if isinstance(node.get("style"), dict)), None)
+    if not source_node:
+        return None
+    style = source_node.get("style") or {}
+    semantic_type = source_node.get("semantic_type")
+    is_stretchable = semantic_type in {
+        "button_candidate",
+        "progress_candidate",
+        "slider_candidate",
+        "toggle_candidate",
+        "tab_candidate",
+        "radio_candidate",
+        "input_candidate",
+        "dropdown_candidate",
+        "manual_prefab_candidate",
+        "panel_candidate",
+        "dialog_candidate",
+        "list_item_candidate",
+    }
+    name = " ".join(str(value or "").lower() for value in (asset.get("name"), source_node.get("name"), source_node.get("path")))
+    if not is_stretchable and not _has_token(name, ("button", "btn", "panel", "card", "dialog", "modal", "window", "popup", "按钮", "面板", "卡片")):
+        return None
+
+    corner = _corner_radius_value(style.get("corner_radius"))
+    border_size = _num((style.get("border") or {}).get("size")) if isinstance(style.get("border"), dict) else None
+    if not corner and not border_size:
+        return None
+    logical_border = max(_num(corner, 0) or 0, (_num(border_size, 0) or 0) * 2)
+    if logical_border <= 0:
+        return None
+    scale = max(0.1, _num(asset.get("scale"), 1) or 1)
+    physical_width = max(width * scale, width)
+    physical_height = max(height * scale, height)
+    border = min(logical_border * scale, max(0, physical_width / 2 - 1), max(0, physical_height / 2 - 1))
+    if border <= 0:
+        return None
+    value = round(border, 2)
+    return {"left": value, "right": value, "top": value, "bottom": value}
+
+
+def _corner_radius_value(value: Any) -> float | None:
+    if isinstance(value, dict):
+        candidates = [value.get(key) for key in ("top_left", "topRight", "top_left_radius", "x", "value")]
+        numeric = [_num(item) for item in candidates]
+        numeric = [item for item in numeric if item is not None]
+        return max(numeric) if numeric else None
+    if isinstance(value, (list, tuple)):
+        numeric = [_num(item) for item in value]
+        numeric = [item for item in numeric if item is not None]
+        return max(numeric) if numeric else None
+    return _num(value)
+
+
+def enrich_delivery_metadata(
+    root_node: dict[str, Any],
+    design_info: dict[str, Any],
+    assets: dict[str, dict[str, Any]] | None = None,
+    provider: str | None = None,
+) -> None:
+    asset_lookup = assets or {}
+    default_parent_global = {"x": 0, "y": 0}
+
+    def walk(node: dict[str, Any], parent_global: dict[str, float]) -> dict[str, float]:
+        node_global = _rect_or_empty(node.get("global_rect"))
+        child_bounds = [walk(child, node_global) for child in node.get("children") or []]
+        own_bounds = _own_visual_bounds(node)
+        bounds = own_bounds
+        if child_bounds and (node.get("type") == "group" or not node.get("asset_ref")):
+            bounds = _union_visual_rect([own_bounds, *child_bounds])
+        node["visual_bounds"] = bounds
+        render_rect = {
+            "x": round(bounds["x"] - (parent_global.get("x") or 0), 1),
+            "y": round(bounds["y"] - (parent_global.get("y") or 0), 1),
+            "width": bounds["width"],
+            "height": bounds["height"],
+        }
+        node["render_rect"] = render_rect
+        node["unity_render_rect_hint"] = _unity_rect(render_rect)
+        node["render_strategy"] = _render_strategy_for_node(node, asset_lookup)
+        node["source_semantics"] = _source_semantics_for_node(node, provider)
+        return bounds
+
+    walk(root_node, default_parent_global)
+
+
+def _own_visual_bounds(node: dict[str, Any]) -> dict[str, float]:
+    rect = _rect_or_empty(node.get("global_rect"))
+    left = rect["x"]
+    top = rect["y"]
+    right = rect["x"] + rect["width"]
+    bottom = rect["y"] + rect["height"]
+    style = node.get("style") or {}
+    reasons: list[str] = []
+
+    border = style.get("border") if isinstance(style.get("border"), dict) else {}
+    border_size = _num(border.get("size")) or 0
+    if border_size > 0:
+        expand = border_size / 2
+        left -= expand
+        top -= expand
+        right += expand
+        bottom += expand
+        reasons.append("border expands visual bounds")
+
+    shadow = style.get("shadow") if isinstance(style.get("shadow"), dict) else None
+    if shadow:
+        left, top, right, bottom = _expand_for_shadow(left, top, right, bottom, shadow)
+        reasons.append("shadow expands visual bounds")
+
+    blur = style.get("blur") if isinstance(style.get("blur"), dict) else None
+    blur_radius = _num((blur or {}).get("radius")) or 0
+    if blur and blur.get("affects_bounds") and blur_radius > 0:
+        left -= blur_radius
+        top -= blur_radius
+        right += blur_radius
+        bottom += blur_radius
+        reasons.append("layer blur expands visual bounds")
+
+    text_effects = ((node.get("text") or {}).get("effects") or {}) if isinstance(node.get("text"), dict) else {}
+    outline = text_effects.get("outline") if isinstance(text_effects.get("outline"), dict) else {}
+    outline_width = _num(outline.get("width")) or 0
+    if outline_width > 0:
+        left -= outline_width
+        top -= outline_width
+        right += outline_width
+        bottom += outline_width
+        reasons.append("text outline expands visual bounds")
+    text_shadow = text_effects.get("shadow") if isinstance(text_effects.get("shadow"), dict) else None
+    if text_shadow:
+        shadow_payload = dict(text_shadow)
+        offset = text_shadow.get("offset") if isinstance(text_shadow.get("offset"), dict) else {}
+        shadow_payload.setdefault("x", offset.get("x"))
+        shadow_payload.setdefault("y", offset.get("y"))
+        left, top, right, bottom = _expand_for_shadow(left, top, right, bottom, shadow_payload)
+        reasons.append("text shadow expands visual bounds")
+
+    bounds = {
+        "x": round(left, 1),
+        "y": round(top, 1),
+        "width": round(max(0, right - left), 1),
+        "height": round(max(0, bottom - top), 1),
+    }
+    if bounds != rect:
+        node["visual_bounds_reasons"] = reasons
+    return bounds
+
+
+def _render_strategy_for_node(node: dict[str, Any], assets: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    semantic_type = node.get("semantic_type")
+    node_type = node.get("type")
+    asset = assets.get(str(node.get("asset_ref") or ""))
+    text = node.get("text") or {}
+    source_metadata = node.get("source_metadata") or {}
+    unsupported_features = list(source_metadata.get("unsupported_psd_features") or [])
+    unsupported_features.extend(source_metadata.get("unsupported_figma_features") or [])
+    reasons: list[str] = []
+    components: list[str] = []
+    mode = "metadata_only"
+    asset_required = False
+    editable = False
+    preserve_children = bool(node.get("children"))
+    requires_review = bool(node.get("requires_semantic_review"))
+
+    manual_tags = _node_manual_tags(node)
+    if "ignore" in manual_tags or semantic_type == "ignored_by_designer" or (node.get("unity_ignore") or {}).get("enabled"):
+        return {
+            "mode": "metadata_only",
+            "target": "unity",
+            "recommended_components": [],
+            "asset_required": False,
+            "asset_ref": node.get("asset_ref"),
+            "editable": False,
+            "preserve_children": False,
+            "requires_review": False,
+            "reasons": ["explicit manual tag tells Unity writers to skip this node"],
+        }
+
+    component_map = {
+        "button_candidate": ["Image", "Button"],
+        "progress_candidate": ["Image", "Slider"],
+        "slider_candidate": ["Image", "Slider"],
+        "toggle_candidate": ["Image", "Toggle"],
+        "tab_group_candidate": ["ToggleGroup"],
+        "tab_candidate": ["Image", "Toggle"],
+        "radio_group_candidate": ["ToggleGroup"],
+        "radio_candidate": ["Image", "Toggle"],
+        "input_candidate": ["Image", "TMP_InputField"],
+        "dropdown_candidate": ["Image", "TMP_Dropdown"],
+        "scroll_area_candidate": ["ScrollRect", "RectMask2D"],
+        "scrollbar_candidate": ["Image", "Scrollbar"],
+        "scroll_viewport_candidate": ["RectMask2D"],
+        "mask_candidate": ["RectMask2D"],
+    }
+    if semantic_type in component_map:
+        components.extend(component_map[semantic_type])
+        reasons.append(f"semantic_type {semantic_type} maps to Unity UI components")
+
+    if node.get("unity_layout_hint"):
+        component = (node.get("unity_layout_hint") or {}).get("component")
+        if component:
+            components.append(str(component))
+            reasons.append("layout geometry maps to a Unity LayoutGroup")
+    if node.get("unity_layout_element_hint"):
+        components.append("LayoutElement")
+        reasons.append("Figma auto-layout child sizing maps to a Unity LayoutElement")
+
+    if semantic_type == "screen_root":
+        mode = "container"
+        components.append("RectTransform")
+        reasons.append("screen root is a structural container")
+    elif text.get("content") and not node.get("asset_ref"):
+        mode = "editable_text"
+        components.append("TextMeshProUGUI")
+        editable = True
+        reasons.append("node has editable text metadata and no raster asset")
+    elif node.get("unity_layout_hint") and node.get("children") and not node.get("asset_ref"):
+        mode = "layout_container"
+        reasons.append("node should preserve child structure as a Unity layout container")
+    elif unsupported_features:
+        mode = "rasterized_group_image" if node.get("children") else "export_image"
+        asset_required = bool(node.get("asset_ref"))
+        requires_review = True
+        reasons.append("source uses complex features: " + ", ".join(sorted(set(unsupported_features))))
+    elif node.get("asset_ref"):
+        asset_required = True
+        if node.get("children"):
+            mode = "rasterized_group_image"
+            reasons.append("node has a raster asset and nested source structure")
+        elif semantic_type in component_map:
+            mode = "sprite_with_component"
+            reasons.append("sprite should remain visible while Unity component handles behavior")
+        else:
+            mode = "sprite_image"
+            reasons.append("node has a source image asset")
+    elif semantic_type in component_map:
+        mode = "interactive_container"
+        reasons.append("component candidate can be created from structure and child refs")
+    elif node_type == "shape":
+        mode = "component_drawable"
+        components.append("Image")
+        editable = True
+        reasons.append("shape has no raster asset and can be approximated with Unity Image")
+    elif node.get("children"):
+        mode = "container"
+        components.append("RectTransform")
+        reasons.append("node groups child layers")
+    else:
+        reasons.append("node carries metadata but no direct visual output")
+
+    style = node.get("style") or {}
+    if style.get("shadow"):
+        components.append("Shadow")
+        requires_review = True
+        reasons.append("shadow may need Unity Shadow or raster fallback")
+    if style.get("blur"):
+        requires_review = True
+        reasons.append("blur should use rendered asset export or visual diff for exact fidelity")
+    blend_mode = str(style.get("blend_mode") or "").upper()
+    if blend_mode not in {"", "NORMAL", "PASS_THROUGH"}:
+        requires_review = True
+        reasons.append("non-normal blend mode may not match Unity UI Image blending")
+    if style.get("border"):
+        reasons.append("border may need sprite/nine-slice or custom renderer")
+    if asset and (asset.get("nine_slice_hint") or {}).get("candidate"):
+        reasons.append("asset is a nine-slice candidate")
+
+    components = _unique_preserve_order([component for component in components if component])
+    return {
+        "mode": mode,
+        "target": "unity",
+        "recommended_components": components,
+        "asset_required": asset_required,
+        "asset_ref": node.get("asset_ref"),
+        "editable": editable,
+        "preserve_children": preserve_children,
+        "requires_review": requires_review,
+        "reasons": _unique_preserve_order(reasons),
+    }
+
+
+def _source_semantics_for_node(node: dict[str, Any], provider: str | None) -> dict[str, Any]:
+    hints = {
+        key: node.get(key)
+        for key in (
+            "unity_interaction_hint",
+            "unity_button_hint",
+            "unity_slider_hint",
+            "unity_toggle_hint",
+            "unity_tab_group_hint",
+            "unity_tab_hint",
+            "unity_radio_group_hint",
+            "unity_radio_hint",
+            "unity_input_hint",
+            "unity_dropdown_hint",
+            "unity_mask_hint",
+            "unity_layout_hint",
+            "unity_layout_element_hint",
+            "unity_anchor_hint",
+            "unity_scroll_hint",
+            "unity_scrollbar_hint",
+            "unity_text_hint",
+            "component_variant_hint",
+            "variant_group_hint",
+            "figma_interaction_hint",
+            "unity_navigation_hint",
+        )
+        if node.get(key)
+    }
+    candidates = list(node.get("semantic_candidates") or [])
+    reason_text = " ".join(node.get("semantic_reasons") or [])
+    manual_tags = _node_manual_tags(node)
+    explicit = "explicit" in reason_text.lower() or bool(manual_tags)
+    source_metadata = node.get("source_metadata") or {}
+    source_features = {
+        key: source_metadata.get(key)
+        for key in (
+            "psd_layer_kind",
+            "psd_layer_kind_normalized",
+            "psd_blend_mode_normalized",
+            "photoshop_layer_kind",
+            "rasterized_export",
+            "has_mask",
+            "has_vector_mask",
+            "has_clipping_mask",
+            "has_layer_effects",
+            "uses_non_normal_blend_mode",
+            "is_smart_object",
+            "is_adjustment_layer",
+            "unsupported_psd_features",
+            "unsupported_figma_features",
+            "recommended_fidelity_mode",
+            "figma_effects",
+            "figma_type",
+            "component_id",
+            "component_set_id",
+            "component_properties",
+            "component_property_definitions",
+            "variant_properties",
+            "variant_axes",
+            "prototype_reactions",
+            "styles",
+            "constraints",
+            "blend_mode",
+            "has_complex_effects",
+            "has_mask",
+            "layout_mode",
+            "layout_align",
+            "layout_grow",
+            "layout_positioning",
+            "layout_sizing_horizontal",
+            "layout_sizing_vertical",
+            "clips_content",
+            "manual_tags",
+        )
+        if key in source_metadata
+    }
+    figma_features = {
+        key: source_metadata.get(key)
+        for key in (
+            "figma_node_id",
+            "figma_file_key",
+            "figma_type",
+            "component_id",
+            "component_set_id",
+            "variant_properties",
+            "variant_axes",
+            "prototype_reactions",
+            "layout_mode",
+            "constraints",
+            "layout_align",
+            "layout_grow",
+            "layout_positioning",
+            "layout_sizing_horizontal",
+            "layout_sizing_vertical",
+            "blend_mode",
+            "figma_effects",
+            "unsupported_figma_features",
+            "has_complex_effects",
+            "has_mask",
+            "styles",
+            "manual_tags",
+        )
+        if source_metadata.get(key) not in (None, {}, [])
+    }
+    return {
+        "provider": provider or source_metadata.get("source_provider"),
+        "primary": node.get("semantic_type"),
+        "confidence": node.get("semantic_confidence"),
+        "candidates": candidates,
+        "reasons": node.get("semantic_reasons") or [],
+        "manual_tags": manual_tags,
+        "inference": {
+            "automatic": bool(candidates),
+            "explicit": explicit,
+            "name_or_text_based": any("name" in str(reason).lower() or "text" in str(reason).lower() for reason in node.get("semantic_reasons") or []),
+            "layout_inferred": "unity_layout_hint" in hints,
+            "component_based": bool(source_metadata.get("component_id") or node.get("component_variant_hint") or node.get("variant_group_hint")),
+            "variant_based": bool(source_metadata.get("variant_properties") or node.get("variant_group_hint")),
+            "component_hints": sorted(hints.keys()),
+        },
+        "component_hints": hints,
+        "source_features": source_features,
+        "figma": figma_features,
+    }
+
+
+def attach_reusable_prefab_registry(packet: dict[str, Any]) -> None:
+    """Attach stable prefab reuse hints without changing the source tree shape."""
+    assets = {asset.get("id"): asset for asset in packet.get("assets") or [] if asset.get("id")}
+    all_nodes: list[dict[str, Any]] = []
+
+    def walk(node: dict[str, Any]) -> None:
+        all_nodes.append(node)
+        for child in node.get("children") or []:
+            walk(child)
+
+    for root in packet.get("nodes") or []:
+        walk(root)
+
+    for node in all_nodes:
+        node.pop("reusable_prefab_key", None)
+        node.pop("reusable_prefab", None)
+
+    grouped: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for node in all_nodes:
+        descriptor = _reusable_prefab_descriptor(node, assets)
+        if not descriptor:
+            continue
+        grouped.setdefault(descriptor["key"], []).append((descriptor, node))
+
+    reusable_prefabs = []
+    reused_node_count = 0
+    for key, items in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])):
+        first_descriptor = items[0][0]
+        definition_node = items[0][1]
+        node_ids = [str(node.get("id")) for _, node in items]
+        instance_count = len(items)
+        is_reused = instance_count > 1
+        suggested_name = _reusable_prefab_name(first_descriptor)
+        suggested_path = f"Assets/DesignToUnity/Reusable/{first_descriptor['category']}/{suggested_name}.prefab"
+        entry = {
+            "key": key,
+            "category": first_descriptor["category"],
+            "semantic_type": first_descriptor.get("semantic_type"),
+            "render_strategy_mode": first_descriptor.get("render_strategy_mode"),
+            "signature_hash": first_descriptor["signature_hash"],
+            "definition_node_id": definition_node.get("id"),
+            "instance_node_ids": node_ids,
+            "instance_count": instance_count,
+            "suggested_prefab_name": suggested_name,
+            "suggested_prefab_asset_path": suggested_path,
+            "reuse_policy": {
+                "mode": "create_once_then_instantiate",
+                "definition": "first_occurrence",
+                "instance_overrides": first_descriptor.get("instance_override_policy") or [],
+            },
+            "match_basis": first_descriptor.get("match_basis") or [],
+            "variant_properties": first_descriptor.get("variant_properties") or {},
+            "variant_override_fields": [
+                item for item in (first_descriptor.get("instance_override_policy") or []) if str(item).startswith("figma.variant.")
+            ],
+            "reasons": first_descriptor.get("reasons") or [],
+        }
+        if is_reused:
+            reusable_prefabs.append(entry)
+            reused_node_count += instance_count
+
+        for index, (descriptor, node) in enumerate(items):
+            role = "definition" if is_reused and index == 0 else "instance" if is_reused else "unique"
+            marker = {
+                "candidate": True,
+                "is_reused": is_reused,
+                "key": key,
+                "category": descriptor["category"],
+                "instance_role": role,
+                "definition_node_id": definition_node.get("id"),
+                "instance_count": instance_count,
+                "suggested_prefab_name": suggested_name,
+                "suggested_prefab_asset_path": suggested_path,
+                "match_basis": descriptor.get("match_basis") or [],
+                "instance_overrides": _reusable_instance_overrides(node, descriptor.get("strip_text_content")),
+                "variant_properties": descriptor.get("variant_properties") or {},
+                "variant_override_fields": [
+                    item for item in (descriptor.get("instance_override_policy") or []) if str(item).startswith("figma.variant.")
+                ],
+                "reasons": descriptor.get("reasons") or [],
+            }
+            if role == "instance":
+                marker["instantiate_from_node_id"] = definition_node.get("id")
+            node["reusable_prefab_key"] = key
+            node["reusable_prefab"] = marker
+
+    packet["reusable_prefabs"] = reusable_prefabs
+    packet["reusable_prefab_summary"] = {
+        "candidate_node_count": sum(len(items) for items in grouped.values()),
+        "unique_candidate_group_count": len(grouped),
+        "reused_group_count": len(reusable_prefabs),
+        "reused_node_count": reused_node_count,
+        "policy": "Use reusable_prefab.key to save the first definition node as a prefab, then instantiate later nodes with rect/text overrides.",
+    }
+    _attach_prefab_variant_registry(packet, all_nodes)
+
+
+def _attach_prefab_variant_registry(packet: dict[str, Any], all_nodes: list[dict[str, Any]]) -> None:
+    for node in all_nodes:
+        node.pop("prefab_variant", None)
+
+    reusable_by_key = {
+        str(entry.get("key")): entry
+        for entry in packet.get("reusable_prefabs") or []
+        if entry.get("key")
+    }
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for node in all_nodes:
+        metadata = node.get("source_metadata") or {}
+        variant_properties = metadata.get("variant_properties")
+        if not isinstance(variant_properties, dict) or not variant_properties:
+            continue
+        reuse = node.get("reusable_prefab") or {}
+        reusable_key = node.get("reusable_prefab_key") or reuse.get("key")
+        component_id = metadata.get("component_id")
+        group_key = str(reusable_key or component_id or metadata.get("component_set_id") or "")
+        if not group_key:
+            continue
+        grouped.setdefault(group_key, []).append(node)
+
+    variant_groups: list[dict[str, Any]] = []
+    for group_key, nodes in sorted(grouped.items()):
+        distinct: dict[str, dict[str, Any]] = {}
+        for node in nodes:
+            properties = (node.get("source_metadata") or {}).get("variant_properties") or {}
+            signature = json_like_signature(properties)
+            distinct.setdefault(signature, node)
+        if len(distinct) < 2 and not any((node.get("source_metadata") or {}).get("component_set_id") for node in nodes):
+            continue
+
+        reusable_entry = reusable_by_key.get(group_key)
+        first = nodes[0]
+        metadata = first.get("source_metadata") or {}
+        base_prefab_path = reusable_entry.get("suggested_prefab_asset_path") if reusable_entry else None
+        category = (reusable_entry or {}).get("category") or _reusable_prefab_category(first, None)
+        group_hash = _hash({"group_key": group_key, "variants": sorted(distinct)})[:16]
+        suggested_dir = f"Assets/DesignToUnity/Variants/{sanitize_filename(str(category), 'Variants')}"
+        axes = _variant_axes_for_nodes(nodes)
+        variants = []
+        for signature, node in sorted(distinct.items(), key=lambda item: item[0]):
+            properties = (node.get("source_metadata") or {}).get("variant_properties") or {}
+            variant_hash = _hash({"group": group_hash, "variant": properties})[:12]
+            variant_name = sanitize_filename(_variant_prefab_name(first, properties, variant_hash), f"Variant_{variant_hash}")
+            variant_path = f"{suggested_dir}/{variant_name}.prefab"
+            variant_entry = {
+                "key": f"variant_{variant_hash}",
+                "signature": signature,
+                "node_id": node.get("id"),
+                "source_node_id": (node.get("source_metadata") or {}).get("source_node_id"),
+                "variant_properties": dict(sorted(properties.items())),
+                "suggested_prefab_name": variant_name,
+                "suggested_prefab_asset_path": variant_path,
+                "base_prefab_asset_path": base_prefab_path,
+                "overrides": (node.get("reusable_prefab") or {}).get("instance_overrides") or [],
+            }
+            variants.append(variant_entry)
+            node["prefab_variant"] = {
+                "candidate": True,
+                "group_key": f"pvg_{group_hash}",
+                "variant_key": variant_entry["key"],
+                "base_prefab_asset_path": base_prefab_path,
+                "suggested_prefab_asset_path": variant_path,
+                "variant_properties": variant_entry["variant_properties"],
+                "unity_strategy": "prefab_variant_asset",
+            }
+
+        variant_groups.append(
+            {
+                "key": f"pvg_{group_hash}",
+                "provider": ((packet.get("source") or {}).get("provider") or "unknown"),
+                "source": "source_metadata.variant_properties",
+                "reusable_prefab_key": group_key if group_key in reusable_by_key else None,
+                "component_id": metadata.get("component_id"),
+                "component_set_id": metadata.get("component_set_id"),
+                "category": category,
+                "definition_node_id": (reusable_entry or {}).get("definition_node_id"),
+                "base_prefab_asset_path": base_prefab_path,
+                "suggested_variant_dir": suggested_dir,
+                "variant_axes": axes,
+                "variant_count": len(variants),
+                "variant_property_keys": [axis["name"] for axis in axes],
+                "unity_strategy": "prefab_variant_assets",
+                "requires_editor_importer": True,
+                "variants": variants,
+                "reasons": [
+                    "Figma component variant properties were grouped into Unity prefab variant candidates.",
+                    "Use the reusable prefab definition as the base prefab, then save each distinct variant signature as a prefab variant asset.",
+                ],
+            }
+        )
+
+    packet["prefab_variant_groups"] = variant_groups
+    packet["prefab_variant_summary"] = {
+        "group_count": len(variant_groups),
+        "variant_count": sum(len(group.get("variants") or []) for group in variant_groups),
+        "policy": "Create prefab variant assets from reusable prefab definitions when Figma variant properties produce distinct signatures.",
+    }
+
+
+def json_like_signature(value: Any) -> str:
+    if isinstance(value, dict):
+        return "|".join(f"{key}={json_like_signature(item)}" for key, item in sorted(value.items()))
+    if isinstance(value, list):
+        return "[" + ",".join(json_like_signature(item) for item in value) + "]"
+    return str(value)
+
+
+def _variant_axes_for_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    values_by_axis: dict[str, set[str]] = {}
+    definitions: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        hint = node.get("variant_group_hint") or {}
+        for axis in hint.get("variant_axes") or []:
+            if isinstance(axis, dict) and axis.get("name"):
+                definitions[str(axis["name"])] = axis
+        properties = (node.get("source_metadata") or {}).get("variant_properties")
+        if not isinstance(properties, dict):
+            continue
+        for key, value in properties.items():
+            values_by_axis.setdefault(str(key), set()).add(str(value))
+
+    result = []
+    for name in sorted(values_by_axis):
+        definition = definitions.get(name) or {}
+        result.append(
+            {
+                "name": name,
+                "values": sorted(values_by_axis[name]),
+                "source_options": definition.get("variant_options") or definition.get("values") or [],
+            }
+        )
+    return result
+
+
+def _variant_prefab_name(node: dict[str, Any], properties: dict[str, Any], fallback_hash: str) -> str:
+    base = str(node.get("semantic_type") or node.get("name") or "PrefabVariant")
+    slots = [f"{key}_{value}" for key, value in sorted(properties.items())]
+    if not slots:
+        slots = [fallback_hash]
+    return f"{base}_{'_'.join(slots)}"
+
+
+def _reusable_prefab_descriptor(node: dict[str, Any], assets: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    node_id = str(node.get("id") or "")
+    semantic_type = node.get("semantic_type")
+    if not node_id or semantic_type in _NON_REUSABLE_SEMANTICS:
+        return None
+    if node.get("visible") is False:
+        return None
+
+    asset = assets.get(str(node.get("asset_ref") or ""))
+    if asset and asset.get("usage") == "design_reference":
+        return None
+    if asset and asset.get("is_large_background") and semantic_type not in _REUSABLE_COMPONENT_SEMANTICS:
+        return None
+
+    render_strategy = node.get("render_strategy") or {}
+    source_metadata = node.get("source_metadata") or {}
+    variant_properties = source_metadata.get("variant_properties") if isinstance(source_metadata.get("variant_properties"), dict) else {}
+    mode = render_strategy.get("mode")
+    has_text = bool((node.get("text") or {}).get("content"))
+    has_asset = bool(node.get("asset_ref"))
+    has_children = bool(node.get("children"))
+    is_component = semantic_type in _REUSABLE_COMPONENT_SEMANTICS
+    is_structural = semantic_type in _REUSABLE_STRUCTURAL_SEMANTICS
+    is_asset_reusable = bool(
+        asset
+        and (
+            asset.get("is_icon_like")
+            or asset.get("is_button_like")
+            or (asset.get("nine_slice_hint") or {}).get("candidate")
+            or semantic_type in _REUSABLE_STRUCTURAL_SEMANTICS
+        )
+    )
+    is_text_reusable = has_text and not has_asset and not has_children
+    if not (is_component or is_structural or is_asset_reusable or is_text_reusable):
+        return None
+
+    strip_text_content = bool(is_component or semantic_type in {"tab_candidate", "radio_candidate"})
+    signature = _node_reuse_signature(node, assets, is_root=True, strip_text_content=strip_text_content)
+    signature_hash = _hash(signature)[:16]
+    key = f"rpf_{signature_hash}"
+    category = _reusable_prefab_category(node, asset)
+    match_basis = _unique_preserve_order(
+        [
+            "semantic_type" if semantic_type else None,
+            "render_strategy" if mode else None,
+            "asset_signature" if has_asset else None,
+            "size" if (node.get("render_rect") or node.get("local_rect") or node.get("global_rect")) else None,
+            "style" if node.get("style") else None,
+            "child_structure" if has_children else None,
+            "text_style" if has_text else None,
+        ]
+    )
+    reasons = []
+    if is_component:
+        reasons.append(f"{semantic_type} can be turned into a reusable Unity UI prefab")
+    if is_structural:
+        reasons.append(f"{semantic_type} can be reused as a structural/visual prefab")
+    if is_asset_reusable:
+        reasons.append("asset flags indicate icon/button/nine-slice reuse potential")
+    if strip_text_content:
+        reasons.append("text content is treated as an instance override for component reuse")
+    if variant_properties:
+        reasons.append("Figma component properties are treated as variant instance overrides")
+    if is_text_reusable:
+        reasons.append("standalone editable text can be reused when the text style and content match")
+
+    instance_override_policy = ["rect", "text.content"] if strip_text_content else ["rect"]
+    for key in sorted(variant_properties):
+        instance_override_policy.append(f"figma.variant.{key}")
+
+    return {
+        "key": key,
+        "category": category,
+        "semantic_type": semantic_type,
+        "render_strategy_mode": mode,
+        "signature_hash": signature_hash,
+        "signature": signature,
+        "strip_text_content": strip_text_content,
+        "instance_override_policy": _unique_preserve_order(instance_override_policy),
+        "variant_properties": variant_properties,
+        "match_basis": match_basis,
+        "reasons": _unique_preserve_order(reasons),
+    }
+
+
+def _node_reuse_signature(
+    node: dict[str, Any],
+    assets: dict[str, dict[str, Any]],
+    is_root: bool,
+    strip_text_content: bool,
+) -> dict[str, Any]:
+    rect = _rect_or_empty(node.get("render_rect") or node.get("local_rect") or node.get("global_rect"))
+    rect_signature = {
+        "width": rect["width"],
+        "height": rect["height"],
+    }
+    if not is_root:
+        rect_signature["x"] = rect["x"]
+        rect_signature["y"] = rect["y"]
+
+    asset = assets.get(str(node.get("asset_ref") or ""))
+    text = node.get("text") or {}
+    source_metadata = node.get("source_metadata") or {}
+    child_strip_text = strip_text_content or node.get("semantic_type") in _REUSABLE_COMPONENT_SEMANTICS
+    return _compact_signature(
+        {
+            "type": node.get("type"),
+            "semantic_type": node.get("semantic_type"),
+            "figma_component_id": source_metadata.get("component_id"),
+            "figma_variant_slots": sorted((source_metadata.get("variant_properties") or {}).keys()) if isinstance(source_metadata.get("variant_properties"), dict) else None,
+            "render_strategy_mode": (node.get("render_strategy") or {}).get("mode"),
+            "recommended_components": sorted((node.get("render_strategy") or {}).get("recommended_components") or []),
+            "rect": rect_signature,
+            "asset": _asset_reuse_signature(asset) if asset else None,
+            "style": _signature_payload(node.get("style")),
+            "text": _text_reuse_signature(text, include_content=not strip_text_content),
+            "component_hints": _component_hint_signature(node),
+            "children": [
+                _node_reuse_signature(child, assets, is_root=False, strip_text_content=child_strip_text)
+                for child in node.get("children") or []
+            ],
+        }
+    )
+
+
+def _asset_reuse_signature(asset: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not asset:
+        return None
+    content_hash = asset.get("content_hash") or asset.get("file_hash")
+    return _compact_signature(
+        {
+            "content_hash": content_hash,
+            "source": None if content_hash else asset.get("remote_url") or asset.get("file_name") or asset.get("id"),
+            "format": asset.get("format"),
+            "logical_size": asset.get("logical_size"),
+            "size": asset.get("size"),
+            "nine_slice_hint": asset.get("nine_slice_hint"),
+            "usage": asset.get("usage"),
+        }
+    )
+
+
+def _text_reuse_signature(text: dict[str, Any], include_content: bool) -> dict[str, Any] | None:
+    if not isinstance(text, dict) or not text:
+        return None
+    signature = {
+        "content": text.get("content") if include_content else None,
+        "font_family": text.get("font_family"),
+        "font_size": text.get("font_size"),
+        "font_style": text.get("font_style"),
+        "font_weight": text.get("font_weight"),
+        "color": text.get("color"),
+        "align": text.get("align"),
+        "vertical_align": text.get("vertical_align"),
+        "line_height": text.get("line_height"),
+        "letter_spacing": text.get("letter_spacing"),
+        "effects": _signature_payload(text.get("effects")),
+        "multi_style_runs": _signature_payload(text.get("multi_style_runs")),
+    }
+    if not include_content and text.get("content"):
+        signature["content_override_slot"] = True
+    return _compact_signature(signature)
+
+
+def _component_hint_signature(node: dict[str, Any]) -> dict[str, Any] | None:
+    hints = (node.get("source_semantics") or {}).get("component_hints") or {}
+    if not isinstance(hints, dict):
+        return None
+    return _compact_signature({key: _signature_payload(value) for key, value in sorted(hints.items())})
+
+
+def _signature_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        result = {}
+        for key, item in sorted(value.items()):
+            key_text = str(key)
+            lowered = key_text.lower()
+            if lowered in {
+                "id",
+                "node_id",
+                "parent_id",
+                "source_node_id",
+                "source_path",
+                "path",
+                "rect",
+                "hit_rect",
+                "global_rect",
+                "local_rect",
+                "render_rect",
+                "visual_bounds",
+                "label",
+                "variant_properties",
+            }:
+                continue
+            if lowered.endswith("_id") or lowered.endswith("_ids") or lowered.endswith("_path"):
+                continue
+            result[key_text] = _signature_payload(item)
+        return _compact_signature(result)
+    if isinstance(value, list):
+        return [_signature_payload(item) for item in value if item is not None]
+    if isinstance(value, float):
+        return round(value, 4)
+    return value
+
+
+def _compact_signature(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: compacted
+            for key, item in value.items()
+            if (compacted := _compact_signature(item)) not in (None, {}, [])
+        }
+    if isinstance(value, list):
+        return [compacted for item in value if (compacted := _compact_signature(item)) not in (None, {}, [])]
+    return value
+
+
+def _reusable_prefab_category(node: dict[str, Any], asset: dict[str, Any] | None) -> str:
+    semantic_type = node.get("semantic_type")
+    if semantic_type == "manual_prefab_candidate":
+        return "ManualPrefabs"
+    if semantic_type == "button_candidate":
+        return "Buttons"
+    if semantic_type in {"progress_candidate", "slider_candidate"}:
+        return "Sliders"
+    if semantic_type in {"toggle_candidate", "tab_candidate", "radio_candidate", "tab_group_candidate", "radio_group_candidate"}:
+        return "Toggles"
+    if semantic_type == "input_candidate":
+        return "Inputs"
+    if semantic_type == "dropdown_candidate":
+        return "Dropdowns"
+    if semantic_type in {"scroll_area_candidate", "scroll_viewport_candidate", "scroll_content_candidate", "scrollbar_candidate"}:
+        return "Scroll"
+    if semantic_type == "list_item_candidate":
+        return "ListItems"
+    if semantic_type == "mask_candidate":
+        return "Masks"
+    if semantic_type in {"panel_candidate", "dialog_candidate"}:
+        return "Panels"
+    if semantic_type == "icon_candidate" or (asset and asset.get("is_icon_like")):
+        return "Icons"
+    if node.get("type") == "text":
+        return "Texts"
+    return "Visuals"
+
+
+def _reusable_prefab_name(descriptor: dict[str, Any]) -> str:
+    semantic = str(descriptor.get("semantic_type") or descriptor.get("category") or "Prefab")
+    return sanitize_filename(f"{semantic}_{descriptor['signature_hash']}", "ReusablePrefab")
+
+
+def _reusable_instance_overrides(node: dict[str, Any], include_text: bool | None) -> list[dict[str, Any]]:
+    overrides = [
+        {
+            "field": "rect",
+            "source": "node.render_rect",
+            "value": node.get("render_rect") or node.get("local_rect"),
+        }
+    ]
+    if include_text:
+        overrides.extend(_text_override_slots(node))
+    source_metadata = node.get("source_metadata") or {}
+    variant_properties = source_metadata.get("variant_properties") if isinstance(source_metadata.get("variant_properties"), dict) else {}
+    for key, value in sorted(variant_properties.items()):
+        overrides.append(
+            {
+                "field": f"figma.variant.{key}",
+                "source": "source_metadata.variant_properties",
+                "value": value,
+            }
+        )
+    return [_compact_signature(override) for override in overrides]
+
+
+def _text_override_slots(node: dict[str, Any]) -> list[dict[str, Any]]:
+    slots = []
+
+    def walk(current: dict[str, Any]) -> None:
+        text = current.get("text") or {}
+        if text.get("content"):
+            slots.append(
+                {
+                    "field": "text.content",
+                    "node_id": current.get("id"),
+                    "path": current.get("path"),
+                    "value": text.get("content"),
+                }
+            )
+        for child in current.get("children") or []:
+            walk(child)
+
+    walk(node)
+    return slots
+
+
+def _expand_for_shadow(left: float, top: float, right: float, bottom: float, shadow: dict[str, Any]) -> tuple[float, float, float, float]:
+    offset_x = _num(shadow.get("x"), shadow.get("offset_x"), shadow.get("offsetX")) or 0
+    offset_y = _num(shadow.get("y"), shadow.get("offset_y"), shadow.get("offsetY")) or 0
+    blur = _num(shadow.get("blur"), shadow.get("radius"), shadow.get("size")) or 0
+    spread = _num(shadow.get("spread")) or 0
+    expand = max(0, blur + spread)
+    return (
+        min(left, left + offset_x) - expand,
+        min(top, top + offset_y) - expand,
+        max(right, right + offset_x) + expand,
+        max(bottom, bottom + offset_y) + expand,
+    )
+
+
+def _rect_or_empty(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {"x": 0, "y": 0, "width": 0, "height": 0}
+    return {
+        "x": round(_num(value.get("x")) or 0, 1),
+        "y": round(_num(value.get("y")) or 0, 1),
+        "width": round(max(0, _num(value.get("width")) or 0), 1),
+        "height": round(max(0, _num(value.get("height")) or 0), 1),
+    }
+
+
+def _union_visual_rect(rects: list[dict[str, Any]]) -> dict[str, float]:
+    valid = [_rect_or_empty(rect) for rect in rects if (_num((rect or {}).get("width")) or 0) > 0 and (_num((rect or {}).get("height")) or 0) > 0]
+    if not valid:
+        return {"x": 0, "y": 0, "width": 0, "height": 0}
+    left = min(rect["x"] for rect in valid)
+    top = min(rect["y"] for rect in valid)
+    right = max(rect["x"] + rect["width"] for rect in valid)
+    bottom = max(rect["y"] + rect["height"] for rect in valid)
+    return {"x": round(left, 1), "y": round(top, 1), "width": round(right - left, 1), "height": round(bottom - top, 1)}
+
+
+def _manual_semantic_tags(name: Any) -> list[str]:
+    text = str(name or "")
+    tags = re.findall(r"[@#]([a-zA-Z][\w-]*)", text)
+    bracket_tags = re.findall(r"\[([a-zA-Z][\w-]*)\]", text)
+    return sorted({tag.lower() for tag in tags + bracket_tags if tag})
+
+
+def _node_manual_tags(node: dict[str, Any]) -> list[str]:
+    metadata = node.get("source_metadata") if isinstance(node.get("source_metadata"), dict) else {}
+    values: list[Any] = []
+    values.extend(_manual_semantic_tags(node.get("name")))
+    metadata_tags = metadata.get("manual_tags") if metadata else None
+    if isinstance(metadata_tags, list):
+        values.extend(metadata_tags)
+    elif isinstance(metadata_tags, str):
+        values.extend(item for item in re.split(r"[,\s]+", metadata_tags) if item)
+    return sorted({str(value).strip().lower().lstrip("@#") for value in values if str(value).strip()})
+
+
+def _unique_preserve_order(values: list[Any]) -> list[Any]:
+    seen = set()
+    result = []
+    for value in values:
+        marker = repr(value)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        result.append(value)
+    return result
 
 
 def _semantic_summary(root: dict[str, Any]) -> dict[str, list[str]]:

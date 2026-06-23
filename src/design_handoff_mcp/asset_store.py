@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from urllib.parse import urlparse
@@ -53,6 +54,8 @@ class AssetStore:
                 if not target.exists():
                     target.write_bytes(await client.download_bytes(remote_url))
                 asset["local_path"] = str(target)
+                asset["content_hash"] = _file_sha1(target)
+                asset["file_hash"] = asset["content_hash"]
                 detected_size = _image_size(target)
                 if detected_size:
                     asset["size"] = detected_size
@@ -109,3 +112,14 @@ def _image_size(path: Path) -> dict[str, int] | None:
                 }
             idx += length
     return None
+
+
+def _file_sha1(path: Path) -> str | None:
+    try:
+        hasher = hashlib.sha1()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception:
+        return None

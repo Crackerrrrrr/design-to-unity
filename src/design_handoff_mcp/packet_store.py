@@ -43,7 +43,14 @@ def trim_node_tree(node: dict[str, Any], max_depth: int, include_style: bool, de
         "z_index",
         "global_rect",
         "local_rect",
+        "visual_bounds",
+        "render_rect",
         "unity_rect_hint",
+        "unity_render_rect_hint",
+        "render_strategy",
+        "source_semantics",
+        "reusable_prefab_key",
+        "reusable_prefab",
         "asset_ref",
     ]
     if include_style:

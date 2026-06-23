@@ -23,6 +23,7 @@ RECT_MASK_2D_SCRIPT_GUID = "3312d7739989d2b4e91e6319e9a96d76"
 VERTICAL_LAYOUT_GROUP_SCRIPT_GUID = "59f8146938fff824cb5fd77236b75775"
 HORIZONTAL_LAYOUT_GROUP_SCRIPT_GUID = "30649d3a9faa99c48a7b1166b86bf2a0"
 GRID_LAYOUT_GROUP_SCRIPT_GUID = "8a8695521f0d02e499659fee002a26c2"
+LAYOUT_ELEMENT_SCRIPT_GUID = "306cc8c2b49d7114eaa3623786fc2126"
 OUTLINE_SCRIPT_GUID = "e19747de3f5aca642ab2be37e372fb86"
 SHADOW_SCRIPT_GUID = "cfabb0440166ab443bba8876756fdfa9"
 DEFAULT_TMP_FONT_ASSET_GUID = "2f7116f10747a67409388e93052ae222"
@@ -193,9 +194,14 @@ def write_unity_prefab_yaml(
         "vertical_layout_group_node_count": stats["vertical_layout_group_node_count"],
         "horizontal_layout_group_node_count": stats["horizontal_layout_group_node_count"],
         "grid_layout_group_node_count": stats["grid_layout_group_node_count"],
+        "layout_element_node_count": stats["layout_element_node_count"],
         "outline_node_count": stats["outline_node_count"],
         "shadow_node_count": stats["shadow_node_count"],
         "canvas_group_node_count": stats["canvas_group_node_count"],
+        "reusable_prefab_count": stats["reusable_prefab_count"],
+        "reused_prefab_node_count": stats["reused_prefab_node_count"],
+        "prefab_variant_group_count": stats["prefab_variant_group_count"],
+        "prefab_variant_count": stats["prefab_variant_count"],
         "tmp_font_asset_guid": tmp_font_guid,
         "tmp_font_material_file_id": tmp_font_material_file_id,
         "tmp_font_asset_map_count": len(tmp_font_map),
@@ -212,9 +218,11 @@ def write_unity_prefab_yaml(
             "It can add ScrollRect, Scrollbar, and RectMask2D for scroll_area_candidate nodes when viewport/content/scrollbar roles can be inferred.",
             "It can add RectMask2D for mask_candidate nodes as rectangular UI clipping containers.",
             "It can add VerticalLayoutGroup, HorizontalLayoutGroup, or GridLayoutGroup from repeated child geometry.",
+            "It can add LayoutElement for Figma auto-layout child sizing, stretch, grow, or absolute-positioning hints.",
             "It can add CanvasGroup for semi-transparent PSD groups.",
             "Slider fill/handle references are bound from best-effort PSD semantics when child roles can be inferred.",
             "flattened_reference_overlay mode uses the Photoshop-rendered reference as the visible baseline and keeps source nodes as editable/interactive overlays.",
+            "Repeated component reuse is emitted as reusable_prefabs/source-map guidance; the experimental direct YAML output still expands the visible hierarchy for compatibility.",
             "Open the project in Unity after writing so Unity can import generated meta/prefab files.",
             "For production-safe output, prefer the Unity Editor API importer path when available.",
         ],
@@ -244,12 +252,21 @@ def _write_sprite_assets(
         if asset_ref and asset_ref not in used_asset_ids:
             used_asset_ids.append(asset_ref)
 
+    imported_by_signature: dict[str, dict[str, str]] = {}
     for asset_id in used_asset_ids:
         asset = assets.get(asset_id)
         if not asset:
             warnings.append({"code": "missing_asset", "asset_id": asset_id, "message": "Asset is referenced by a node but missing from packet assets."})
             continue
         if asset.get("usage") == "design_reference" and not include_reference:
+            continue
+
+        signature = _sprite_asset_reuse_signature(asset_id, asset)
+        if signature in imported_by_signature:
+            canonical = imported_by_signature[signature]
+            guid_by_id[asset_id] = canonical["guid"]
+            asset["duplicate_of"] = canonical["asset_id"]
+            asset["deduped_unity_asset_path"] = canonical["asset_path"]
             continue
 
         local_path_text = str(asset.get("local_path") or "")
@@ -275,6 +292,7 @@ def _write_sprite_assets(
                 meta_path.write_text(_texture_meta(guid, asset), encoding="utf-8")
             if guid:
                 guid_by_id[asset_id] = guid
+                imported_by_signature[signature] = {"asset_id": asset_id, "asset_path": target_asset_path, "guid": guid}
             continue
 
         shutil.copy2(local_path, target_path)
@@ -282,9 +300,33 @@ def _write_sprite_assets(
         guid = _read_meta_guid(meta_path) or _guid_for_asset(asset_id, target_asset_path)
         meta_path.write_text(_texture_meta(guid, asset), encoding="utf-8")
         guid_by_id[asset_id] = guid
+        imported_by_signature[signature] = {"asset_id": asset_id, "asset_path": target_asset_path, "guid": guid}
         copied.append({"asset_id": asset_id, "asset_path": target_asset_path, "path": str(target_path), "guid": guid})
 
     return copied, guid_by_id, warnings
+
+
+def _sprite_asset_reuse_signature(asset_id: str, asset: dict[str, Any]) -> str:
+    if asset.get("content_hash") or asset.get("file_hash"):
+        basis = {
+            "content_hash": asset.get("content_hash") or asset.get("file_hash"),
+            "format": asset.get("format"),
+            "nine_slice_hint": asset.get("nine_slice_hint"),
+            "unity_import_hints": asset.get("unity_import_hints"),
+        }
+        return "content:" + hashlib.sha1(repr(basis).encode("utf-8", "ignore")).hexdigest()
+    if asset.get("source_image_ref"):
+        basis = {
+            "source_provider": asset.get("source_provider"),
+            "source_image_ref": asset.get("source_image_ref"),
+            "image_fill": asset.get("image_fill"),
+            "format": asset.get("format"),
+            "unity_import_hints": asset.get("unity_import_hints"),
+        }
+        return "figma-image-ref:" + hashlib.sha1(repr(basis).encode("utf-8", "ignore")).hexdigest()
+    if asset.get("remote_url"):
+        return "remote:" + str(asset.get("remote_url"))
+    return "asset:" + asset_id
 
 
 def _normalize_prefab_visual_mode(value: str | None) -> str:
@@ -429,6 +471,7 @@ def _build_prefab_yaml(
         has_scrollbar = _should_add_scrollbar_component(node, add_scroll_components)
         has_rect_mask = bool((add_scroll_components and node_id in scroll_viewport_node_ids) or (add_mask_components and _should_add_mask_component(node)))
         layout_component = _layout_component(node, add_layout_components)
+        has_layout_element = _should_add_layout_element(node, add_layout_components)
         has_canvas_group = bool(add_canvas_group_components and _needs_canvas_group(node, children.get(node_id) or []))
         text_effects = _text_effects(node)
         has_text_outline = bool(has_text and text_effects.get("outline"))
@@ -458,6 +501,7 @@ def _build_prefab_yaml(
             "vertical_layout_group": _file_id(packet_id, node_id, "vertical_layout_group", used_file_ids) if layout_component == "VerticalLayoutGroup" else None,
             "horizontal_layout_group": _file_id(packet_id, node_id, "horizontal_layout_group", used_file_ids) if layout_component == "HorizontalLayoutGroup" else None,
             "grid_layout_group": _file_id(packet_id, node_id, "grid_layout_group", used_file_ids) if layout_component == "GridLayoutGroup" else None,
+            "layout_element": _file_id(packet_id, node_id, "layout_element", used_file_ids) if has_layout_element else None,
             "outline": _file_id(packet_id, node_id, "outline", used_file_ids) if has_text_outline else None,
             "shadow": _file_id(packet_id, node_id, "shadow", used_file_ids) if has_text_shadow else None,
             "canvas_group": _file_id(packet_id, node_id, "canvas_group", used_file_ids) if has_canvas_group else None,
@@ -486,6 +530,7 @@ def _build_prefab_yaml(
     vertical_layout_group_count = 0
     horizontal_layout_group_count = 0
     grid_layout_group_count = 0
+    layout_element_count = 0
     outline_count = 0
     shadow_count = 0
     canvas_group_count = 0
@@ -610,6 +655,9 @@ def _build_prefab_yaml(
         if ids_for_node.get("grid_layout_group"):
             lines.extend(_grid_layout_group_yaml(node, ids_for_node))
             grid_layout_group_count += 1
+        if ids_for_node.get("layout_element"):
+            lines.extend(_layout_element_yaml(node, ids_for_node))
+            layout_element_count += 1
         if ids_for_node.get("scrollbar"):
             target_graphic = ids_for_node.get("image") or ids_for_node.get("tmp_text") or 0
             handle_rect = _scrollbar_handle_ref(node, object_ids)
@@ -646,9 +694,14 @@ def _build_prefab_yaml(
         "vertical_layout_group_node_count": vertical_layout_group_count,
         "horizontal_layout_group_node_count": horizontal_layout_group_count,
         "grid_layout_group_node_count": grid_layout_group_count,
+        "layout_element_node_count": layout_element_count,
         "outline_node_count": outline_count,
         "shadow_node_count": shadow_count,
         "canvas_group_node_count": canvas_group_count,
+        "reusable_prefab_count": len(packet.get("reusable_prefabs") or []),
+        "reused_prefab_node_count": (packet.get("reusable_prefab_summary") or {}).get("reused_node_count", 0),
+        "prefab_variant_group_count": len(packet.get("prefab_variant_groups") or []),
+        "prefab_variant_count": (packet.get("prefab_variant_summary") or {}).get("variant_count", 0),
     }
     source_map = _prefab_source_map(
         packet=packet,
@@ -661,6 +714,8 @@ def _build_prefab_yaml(
         sprite_asset_dir=sprite_asset_dir,
         stats=stats,
         prefab_visual_mode=prefab_visual_mode,
+        default_tmp_font=default_tmp_font,
+        tmp_font_asset_map=tmp_font_asset_map,
     )
     return "\n".join(lines) + "\n", stats, source_map
 
@@ -676,14 +731,18 @@ def _prefab_source_map(
     sprite_asset_dir: str,
     stats: dict[str, int],
     prefab_visual_mode: str,
+    default_tmp_font: dict[str, Any],
+    tmp_font_asset_map: dict[str, str],
 ) -> dict[str, Any]:
     source = packet.get("source") or {}
     design = packet.get("design") or {}
     node_entries = []
+    unity_paths = _source_map_unity_paths(all_nodes)
     for node in all_nodes:
         node_id = str(node.get("id"))
         asset_ref = node.get("asset_ref")
         asset = assets.get(asset_ref) if asset_ref else None
+        text_info = _source_map_text_info(node.get("text"), default_tmp_font, tmp_font_asset_map)
         component_file_ids = {
             key: value
             for key, value in (object_ids.get(node_id) or {}).items()
@@ -695,6 +754,7 @@ def _prefab_source_map(
             "children": children.get(node_id) or [],
             "name": node.get("name"),
             "unity_name_hint": node.get("unity_name_hint") or node.get("name"),
+            "unity_path": unity_paths.get(node_id),
             "path": node.get("path"),
             "type": node.get("type"),
             "semantic_type": node.get("semantic_type"),
@@ -703,9 +763,21 @@ def _prefab_source_map(
             "requires_semantic_review": node.get("requires_semantic_review"),
             "global_rect": node.get("global_rect"),
             "local_rect": node.get("local_rect"),
+            "visual_bounds": node.get("visual_bounds"),
+            "render_rect": node.get("render_rect"),
             "unity_rect_hint": node.get("unity_rect_hint"),
+            "unity_anchor_hint": node.get("unity_anchor_hint"),
+            "unity_render_rect_hint": node.get("unity_render_rect_hint"),
+            "render_strategy": node.get("render_strategy"),
+            "source_semantics": node.get("source_semantics"),
+            "unity_ignore": node.get("unity_ignore"),
+            "figma_interaction_hint": node.get("figma_interaction_hint"),
+            "unity_navigation_hint": node.get("unity_navigation_hint"),
+            "reusable_prefab_key": node.get("reusable_prefab_key"),
+            "reusable_prefab": node.get("reusable_prefab"),
+            "prefab_variant": node.get("prefab_variant"),
             "style": node.get("style"),
-            "text": node.get("text"),
+            "text": text_info,
             "source_metadata": node.get("source_metadata"),
             "content_hash": node.get("content_hash"),
             "component_file_ids": component_file_ids,
@@ -721,8 +793,12 @@ def _prefab_source_map(
             "unity_dropdown_hint": node.get("unity_dropdown_hint"),
             "unity_mask_hint": node.get("unity_mask_hint"),
             "unity_layout_hint": node.get("unity_layout_hint"),
+            "unity_layout_element_hint": node.get("unity_layout_element_hint"),
             "unity_scroll_hint": node.get("unity_scroll_hint"),
             "unity_scrollbar_hint": node.get("unity_scrollbar_hint"),
+            "figma_interaction_hint": node.get("figma_interaction_hint"),
+            "unity_navigation_hint": node.get("unity_navigation_hint"),
+            "incremental_update": _node_incremental_update(node, asset),
         }
         visual_suppressed = _suppresses_source_visual(prefab_visual_mode, node)
         if prefab_visual_mode == "flattened_reference_overlay":
@@ -736,6 +812,11 @@ def _prefab_source_map(
                 "usage": asset.get("usage"),
                 "unity_guid": asset_guid_by_id.get(asset_ref),
                 "suggested_unity_path": asset.get("suggested_unity_path"),
+                "deduped_unity_asset_path": asset.get("deduped_unity_asset_path"),
+                "duplicate_of": asset.get("duplicate_of"),
+                "content_hash": asset.get("content_hash") or asset.get("file_hash"),
+                "source_image_ref": asset.get("source_image_ref"),
+                "image_fill": asset.get("image_fill"),
                 "logical_size": asset.get("logical_size"),
                 "nine_slice_hint": asset.get("nine_slice_hint"),
             }
@@ -745,6 +826,11 @@ def _prefab_source_map(
                 "name": asset.get("name"),
                 "file_name": asset.get("file_name"),
                 "usage": asset.get("usage"),
+                "deduped_unity_asset_path": asset.get("deduped_unity_asset_path"),
+                "duplicate_of": asset.get("duplicate_of"),
+                "content_hash": asset.get("content_hash") or asset.get("file_hash"),
+                "source_image_ref": asset.get("source_image_ref"),
+                "image_fill": asset.get("image_fill"),
                 "logical_size": asset.get("logical_size"),
                 "nine_slice_hint": asset.get("nine_slice_hint"),
                 "visual_suppressed": True,
@@ -762,6 +848,10 @@ def _prefab_source_map(
         "prefab_asset_path": prefab_asset_path,
         "sprite_asset_dir": sprite_asset_dir,
         "stats": stats,
+        "reusable_prefabs": packet.get("reusable_prefabs") or [],
+        "reusable_prefab_summary": packet.get("reusable_prefab_summary") or {},
+        "prefab_variant_groups": packet.get("prefab_variant_groups") or [],
+        "prefab_variant_summary": packet.get("prefab_variant_summary") or {},
         "nodes": node_entries,
         "assets": [
             _drop_none(
@@ -772,6 +862,11 @@ def _prefab_source_map(
                     "usage": asset.get("usage"),
                     "unity_guid": asset_guid_by_id.get(asset_id),
                     "suggested_unity_path": asset.get("suggested_unity_path"),
+                    "deduped_unity_asset_path": asset.get("deduped_unity_asset_path"),
+                    "duplicate_of": asset.get("duplicate_of"),
+                    "content_hash": asset.get("content_hash") or asset.get("file_hash"),
+                    "source_image_ref": asset.get("source_image_ref"),
+                    "image_fill": asset.get("image_fill"),
                     "source_node_id": asset.get("source_node_id"),
                     "logical_size": asset.get("logical_size"),
                     "nine_slice_hint": asset.get("nine_slice_hint"),
@@ -787,12 +882,205 @@ def _prefab_source_map(
             prefab_visual_mode=prefab_visual_mode,
         ),
         "update_policy_hint": _update_policy_hint(),
+        "incremental_update_plan": _incremental_update_plan(packet, stats),
         "usage_notes": [
             "Use node_id/content_hash to diff regenerated prefab snapshots.",
+            "Use reusable_prefabs to save repeated definition nodes once and instantiate later nodes with rect/text overrides.",
             "Use component_file_ids when inspecting direct YAML output; Unity may rewrite fileIDs after editor-side prefab edits.",
             "Use source_metadata.source_path to map GameObjects back to PSD/Lanhu layers.",
             "In flattened_reference_overlay mode, the visible design is the reference overlay; source nodes are retained for structure, hit areas, text data, and future edits.",
         ],
+    }
+
+
+def _source_map_unity_paths(all_nodes: list[dict[str, Any]]) -> dict[str, str]:
+    nodes_by_id = {str(node.get("id")): node for node in all_nodes}
+
+    def object_name(node: dict[str, Any]) -> str:
+        return _safe_name(str(node.get("unity_name_hint") or node.get("name") or node.get("id") or "Node"))
+
+    siblings_by_parent: dict[str | None, list[str]] = {}
+    base_name_by_id: dict[str, str] = {}
+    segment_by_id: dict[str, str] = {}
+    for node in all_nodes:
+        node_id = str(node.get("id"))
+        parent_id = str(node.get("parent_id")) if node.get("parent_id") is not None else None
+        siblings_by_parent.setdefault(parent_id, []).append(node_id)
+        base_name_by_id[node_id] = object_name(node)
+
+    for siblings in siblings_by_parent.values():
+        totals: dict[str, int] = {}
+        seen: dict[str, int] = {}
+        for node_id in siblings:
+            totals[base_name_by_id[node_id]] = totals.get(base_name_by_id[node_id], 0) + 1
+        for node_id in siblings:
+            base_name = base_name_by_id[node_id]
+            seen[base_name] = seen.get(base_name, 0) + 1
+            segment_by_id[node_id] = f"{base_name}[{seen[base_name]}]" if totals[base_name] > 1 else base_name
+    cache: dict[str, str] = {}
+
+    def path_for(node_id: str) -> str:
+        if node_id in cache:
+            return cache[node_id]
+        node = nodes_by_id.get(node_id) or {}
+        name = segment_by_id.get(node_id) or object_name(node)
+        parent_id = node.get("parent_id")
+        if parent_id and str(parent_id) in nodes_by_id:
+            value = f"{path_for(str(parent_id))}/{name}"
+        else:
+            value = name
+        cache[node_id] = value
+        return value
+
+    return {node_id: path_for(node_id) for node_id in nodes_by_id}
+
+
+def _source_map_text_info(text: Any, default_tmp_font: dict[str, Any], tmp_font_asset_map: dict[str, str]) -> dict[str, Any] | None:
+    if not isinstance(text, dict):
+        return None
+    result = dict(text)
+    resolved_font = _resolve_tmp_font_for_text(result, default_tmp_font, tmp_font_asset_map)
+    if resolved_font.get("guid"):
+        result["tmp_font_asset_guid"] = resolved_font.get("guid")
+        result["tmp_font_material_file_id"] = resolved_font.get("material_file_id")
+        result.setdefault("font_hint", {})
+        if isinstance(result["font_hint"], dict):
+            result["font_hint"]["tmp_font_asset_guid"] = resolved_font.get("guid")
+            result["font_hint"]["tmp_font_material_file_id"] = resolved_font.get("material_file_id")
+    return result
+
+
+def _incremental_update_plan(packet: dict[str, Any], stats: dict[str, int]) -> dict[str, Any]:
+    source = packet.get("source") or {}
+    return {
+        "status": "planned",
+        "source_provider": source.get("provider"),
+        "identity_keys": [
+            "node_id",
+            "unity_path",
+            "source_metadata.source_node_id",
+            "source_metadata.figma_node_id",
+            "source_metadata.component_id",
+            "source_metadata.source_path",
+            "reusable_prefab_key",
+            "asset.content_hash",
+        ],
+        "operations": [
+            {
+                "id": "match_existing_nodes",
+                "description": "Match regenerated source-map nodes against existing Unity objects before applying field updates.",
+            },
+            {
+                "id": "update_owned_fields",
+                "description": "Overwrite only design-owned RectTransform, Graphic, TMP, and known UI component fields.",
+            },
+            {
+                "id": "reuse_unchanged_assets",
+                "description": "Skip sprite import when content_hash and suggested Unity path are unchanged.",
+            },
+            {
+                "id": "refresh_reusable_definitions",
+                "description": "Rebuild reusable prefab definitions only when their definition node or asset hashes change.",
+            },
+            {
+                "id": "refresh_prefab_variants",
+                "description": "Create or refresh prefab variant assets when Figma variant signatures change.",
+            },
+            {
+                "id": "preserve_user_owned_fields",
+                "description": "Preserve user scripts, event bindings, animations, runtime data bindings, and user-owned children by default.",
+            },
+        ],
+        "node_update_fields": _update_policy_hint()["safe_to_overwrite"],
+        "preserve_by_default": _update_policy_hint()["preserve_by_default"],
+        "reusable_prefab_update": {
+            "definition_key": "reusable_prefab_key",
+            "definition_node_id": "reusable_prefabs[].definition_node_id",
+            "instance_node_ids": "reusable_prefabs[].instance_node_ids",
+            "override_fields": ["rect", "text.content", "asset_ref", "figma.variant", "source_semantics"],
+        },
+        "prefab_variant_update": {
+            "group_key": "prefab_variant_groups[].key",
+            "base_prefab_asset_path": "prefab_variant_groups[].base_prefab_asset_path",
+            "variant_prefab_asset_path": "prefab_variant_groups[].variants[].suggested_prefab_asset_path",
+            "identity_keys": ["prefab_variant.variant_key", "source_metadata.variant_properties", "reusable_prefab_key"],
+        },
+        "asset_update": {
+            "identity_keys": ["content_hash", "source_node_id", "source_image_ref", "suggested_unity_path"],
+            "skip_when_unchanged": True,
+            "dedupe_fields": ["duplicate_of", "deduped_unity_asset_path"],
+        },
+        "delete_policy": {
+            "default": "mark_pending_delete",
+            "reason": "Avoid deleting Unity user edits until the importer has an explicit confirmation or ownership marker.",
+        },
+        "expected_scope": {
+            "node_count": stats.get("node_count", 0),
+            "asset_count": stats.get("asset_count", 0),
+            "reusable_prefab_count": stats.get("reusable_prefab_count", 0),
+            "prefab_variant_group_count": stats.get("prefab_variant_group_count", 0),
+            "prefab_variant_count": stats.get("prefab_variant_count", 0),
+        },
+    }
+
+
+def _node_incremental_update(node: dict[str, Any], asset: dict[str, Any] | None) -> dict[str, Any]:
+    source_metadata = node.get("source_metadata") or {}
+    identity_keys = ["node_id", "unity_path"]
+    if source_metadata.get("source_node_id"):
+        identity_keys.append("source_metadata.source_node_id")
+    if source_metadata.get("figma_node_id"):
+        identity_keys.append("source_metadata.figma_node_id")
+    if source_metadata.get("component_id"):
+        identity_keys.append("source_metadata.component_id")
+    if source_metadata.get("source_path"):
+        identity_keys.append("source_metadata.source_path")
+    if node.get("reusable_prefab_key"):
+        identity_keys.append("reusable_prefab_key")
+    if asset and (asset.get("content_hash") or asset.get("file_hash")):
+        identity_keys.append("asset.content_hash")
+
+    owned_fields = [
+        "RectTransform.anchoredPosition",
+        "RectTransform.sizeDelta",
+        "RectTransform.anchorMin",
+        "RectTransform.anchorMax",
+        "RectTransform.pivot",
+    ]
+    node_type = node.get("type")
+    semantic_type = node.get("semantic_type")
+    if asset:
+        owned_fields.extend(["Image.sprite", "Image.color", "Image.raycastTarget"])
+    if node_type == "text" or node.get("text"):
+        owned_fields.extend(
+            [
+                "TextMeshProUGUI.text",
+                "TextMeshProUGUI.fontSize",
+                "TextMeshProUGUI.color",
+                "TextMeshProUGUI.font",
+                "TextMeshProUGUI.fontStyle",
+                "TextMeshProUGUI.richText",
+                "TextMeshProUGUI.lineSpacing",
+                "TextMeshProUGUI.characterSpacing",
+            ]
+        )
+    if semantic_type == "button_candidate":
+        owned_fields.append("Button.targetGraphic")
+    if semantic_type in {"slider_candidate", "progress_candidate"}:
+        owned_fields.extend(["Slider.fillRect", "Slider.handleRect", "Slider.value"])
+    if semantic_type in {"toggle_candidate", "tab_candidate", "radio_candidate"}:
+        owned_fields.extend(["Toggle.targetGraphic", "Toggle.graphic", "Toggle.isOn", "Toggle.group"])
+    if semantic_type == "scroll_area_candidate":
+        owned_fields.extend(["ScrollRect.content", "ScrollRect.viewport", "ScrollRect.horizontalScrollbar", "ScrollRect.verticalScrollbar"])
+
+    return {
+        "stable_id": node.get("id"),
+        "source_node_id": source_metadata.get("source_node_id") or source_metadata.get("figma_node_id"),
+        "identity_keys": identity_keys,
+        "ownership": "owned_by_design",
+        "owned_fields": sorted(set(owned_fields)),
+        "preserve_fields": _update_policy_hint()["preserve_by_default"],
+        "delete_policy": "mark_pending_delete",
     }
 
 
@@ -850,6 +1138,7 @@ def _unity_import_manifest(
             "VerticalLayoutGroup": stats.get("vertical_layout_group_node_count", 0),
             "HorizontalLayoutGroup": stats.get("horizontal_layout_group_node_count", 0),
             "GridLayoutGroup": stats.get("grid_layout_group_node_count", 0),
+            "LayoutElement": stats.get("layout_element_node_count", 0),
             "Outline": stats.get("outline_node_count", 0),
             "Shadow": stats.get("shadow_node_count", 0),
             "CanvasGroup": stats.get("canvas_group_node_count", 0),
@@ -978,6 +1267,8 @@ def _game_object_yaml(node: dict[str, Any], ids: dict[str, int | None]) -> list[
         component_lines.append(f"  - component: {{fileID: {ids['horizontal_layout_group']}}}")
     if ids.get("grid_layout_group"):
         component_lines.append(f"  - component: {{fileID: {ids['grid_layout_group']}}}")
+    if ids.get("layout_element"):
+        component_lines.append(f"  - component: {{fileID: {ids['layout_element']}}}")
     if ids.get("scrollbar"):
         component_lines.append(f"  - component: {{fileID: {ids['scrollbar']}}}")
     if ids.get("scroll_rect"):
@@ -1029,6 +1320,7 @@ def _canvas_group_yaml(node: dict[str, Any], ids: dict[str, int | None]) -> list
 
 def _rect_transform_yaml(node: dict[str, Any], ids: dict[str, int | None], parent_rect: int | None, child_rect_ids: list[int | None]) -> list[str]:
     rect = node.get("local_rect") or {}
+    anchor = _rect_transform_anchor_values(node)
     children = " []" if not child_rect_ids else ""
     lines = [
         f"--- !u!224 &{ids['rect']}",
@@ -1050,14 +1342,32 @@ def _rect_transform_yaml(node: dict[str, Any], ids: dict[str, int | None], paren
         [
             f"  m_Father: {{fileID: {parent_rect or 0}}}",
             "  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}",
-            "  m_AnchorMin: {x: 0, y: 1}",
-            "  m_AnchorMax: {x: 0, y: 1}",
-            f"  m_AnchoredPosition: {{x: {_num(rect.get('x'))}, y: {-_num(rect.get('y'))}}}",
-            f"  m_SizeDelta: {{x: {_num(rect.get('width'))}, y: {_num(rect.get('height'))}}}",
-            "  m_Pivot: {x: 0, y: 1}",
+            f"  m_AnchorMin: {{x: {anchor['anchorMin'][0]}, y: {anchor['anchorMin'][1]}}}",
+            f"  m_AnchorMax: {{x: {anchor['anchorMax'][0]}, y: {anchor['anchorMax'][1]}}}",
+            f"  m_AnchoredPosition: {{x: {anchor['anchoredPosition'][0]}, y: {anchor['anchoredPosition'][1]}}}",
+            f"  m_SizeDelta: {{x: {anchor['sizeDelta'][0]}, y: {anchor['sizeDelta'][1]}}}",
+            f"  m_Pivot: {{x: {anchor['pivot'][0]}, y: {anchor['pivot'][1]}}}",
         ]
     )
     return lines
+
+
+def _rect_transform_anchor_values(node: dict[str, Any]) -> dict[str, list[float]]:
+    rect = node.get("local_rect") or {}
+    hint = node.get("unity_anchor_hint") if isinstance(node.get("unity_anchor_hint"), dict) else {}
+    return {
+        "anchorMin": _vec2_hint(hint.get("anchorMin"), [0, 1]),
+        "anchorMax": _vec2_hint(hint.get("anchorMax"), [0, 1]),
+        "pivot": _vec2_hint(hint.get("pivot"), [0, 1]),
+        "anchoredPosition": _vec2_hint(hint.get("anchoredPosition"), [_num(rect.get("x")), -_num(rect.get("y"))]),
+        "sizeDelta": _vec2_hint(hint.get("sizeDelta"), [_num(rect.get("width")), _num(rect.get("height"))]),
+    }
+
+
+def _vec2_hint(value: Any, fallback: list[float]) -> list[float]:
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        return [round(_num(value[0]), 6), round(_num(value[1]), 6)]
+    return [round(_num(fallback[0]), 6), round(_num(fallback[1]), 6)]
 
 
 def _canvas_renderer_yaml(ids: dict[str, int | None]) -> list[str]:
@@ -1604,6 +1914,13 @@ def _layout_component(node: dict[str, Any], add_layout_components: bool) -> str 
     return None
 
 
+def _should_add_layout_element(node: dict[str, Any], add_layout_components: bool) -> bool:
+    if not add_layout_components:
+        return False
+    hint = node.get("unity_layout_element_hint") or {}
+    return bool(hint.get("can_add_layout_element") and not hint.get("requires_review"))
+
+
 def _slider_refs(
     node: dict[str, Any],
     object_ids: dict[str, dict[str, int | None]],
@@ -1796,6 +2113,7 @@ def _horizontal_or_vertical_layout_group_yaml(
     hint = node.get("unity_layout_hint") or {}
     padding = _layout_padding_from_hint(hint)
     spacing = _num((hint.get("spacing") or {}).get("y" if class_name == "VerticalLayoutGroup" else "x"), 0)
+    child_alignment = _layout_child_alignment_enum(hint)
     return [
         f"--- !u!114 &{ids[id_key]}",
         "MonoBehaviour:",
@@ -1810,7 +2128,7 @@ def _horizontal_or_vertical_layout_group_yaml(
         "  m_Name: ",
         f"  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.{class_name}",
         f"  m_Padding: {{m_Left: {padding['left']}, m_Right: {padding['right']}, m_Top: {padding['top']}, m_Bottom: {padding['bottom']}}}",
-        "  m_ChildAlignment: 0",
+        f"  m_ChildAlignment: {child_alignment}",
         f"  m_Spacing: {_num(spacing, 0)}",
         f"  m_ChildForceExpandWidth: {_bool_int(hint.get('child_force_expand_width'))}",
         f"  m_ChildForceExpandHeight: {_bool_int(hint.get('child_force_expand_height'))}",
@@ -1827,6 +2145,7 @@ def _grid_layout_group_yaml(node: dict[str, Any], ids: dict[str, int | None]) ->
     padding = _layout_padding_from_hint(hint)
     cell_size = hint.get("cell_size") or {}
     spacing = hint.get("spacing") or {}
+    child_alignment = _layout_child_alignment_enum(hint)
     constraint = 1 if str(hint.get("constraint") or "") == "fixed_column_count" else 0
     constraint_count = max(1, int(_num(hint.get("constraint_count"), 1)))
     return [
@@ -1843,13 +2162,39 @@ def _grid_layout_group_yaml(node: dict[str, Any], ids: dict[str, int | None]) ->
         "  m_Name: ",
         "  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.GridLayoutGroup",
         f"  m_Padding: {{m_Left: {padding['left']}, m_Right: {padding['right']}, m_Top: {padding['top']}, m_Bottom: {padding['bottom']}}}",
-        "  m_ChildAlignment: 0",
+        f"  m_ChildAlignment: {child_alignment}",
         "  m_StartCorner: 0",
         "  m_StartAxis: 0",
         f"  m_CellSize: {{x: {_num(cell_size.get('width'), 100)}, y: {_num(cell_size.get('height'), 100)}}}",
         f"  m_Spacing: {{x: {_num(spacing.get('x'), 0)}, y: {_num(spacing.get('y'), 0)}}}",
         f"  m_Constraint: {constraint}",
         f"  m_ConstraintCount: {constraint_count}",
+    ]
+
+
+def _layout_element_yaml(node: dict[str, Any], ids: dict[str, int | None]) -> list[str]:
+    hint = node.get("unity_layout_element_hint") or {}
+    return [
+        f"--- !u!114 &{ids['layout_element']}",
+        "MonoBehaviour:",
+        "  m_ObjectHideFlags: 0",
+        "  m_CorrespondingSourceObject: {fileID: 0}",
+        "  m_PrefabInstance: {fileID: 0}",
+        "  m_PrefabAsset: {fileID: 0}",
+        f"  m_GameObject: {{fileID: {ids['go']}}}",
+        "  m_Enabled: 1",
+        "  m_EditorHideFlags: 0",
+        f"  m_Script: {{fileID: 11500000, guid: {LAYOUT_ELEMENT_SCRIPT_GUID}, type: 3}}",
+        "  m_Name: ",
+        "  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement",
+        f"  m_IgnoreLayout: {_bool_int(hint.get('ignore_layout'))}",
+        f"  m_MinWidth: {_layout_float(hint.get('min_width'))}",
+        f"  m_MinHeight: {_layout_float(hint.get('min_height'))}",
+        f"  m_PreferredWidth: {_layout_float(hint.get('preferred_width'))}",
+        f"  m_PreferredHeight: {_layout_float(hint.get('preferred_height'))}",
+        f"  m_FlexibleWidth: {_layout_float(hint.get('flexible_width'))}",
+        f"  m_FlexibleHeight: {_layout_float(hint.get('flexible_height'))}",
+        f"  m_LayoutPriority: {max(1, int(_num(hint.get('layout_priority'), 1)))}",
     ]
 
 
@@ -1863,8 +2208,30 @@ def _layout_padding_from_hint(hint: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def _layout_child_alignment_enum(hint: dict[str, Any]) -> int:
+    raw = hint.get("child_alignment_enum")
+    if raw is not None:
+        return max(0, min(8, int(_num(raw, 0))))
+    mapping = {
+        "UpperLeft": 0,
+        "UpperCenter": 1,
+        "UpperRight": 2,
+        "MiddleLeft": 3,
+        "MiddleCenter": 4,
+        "MiddleRight": 5,
+        "LowerLeft": 6,
+        "LowerCenter": 7,
+        "LowerRight": 8,
+    }
+    return mapping.get(str(hint.get("child_alignment") or ""), 0)
+
+
 def _bool_int(value: Any) -> int:
     return 1 if bool(value) else 0
+
+
+def _layout_float(value: Any) -> float:
+    return round(_num(value, -1), 6)
 
 
 def _selectable_yaml(target_graphic: int | None, interactable: bool = True) -> list[str]:
@@ -1915,12 +2282,30 @@ def _unity_creation_order(packet: dict[str, Any]) -> list[dict[str, Any]]:
             children.append(current)
         children.sort(key=lambda item: item.get("z_index") or 0, reverse=reverse_siblings)
         for child in children:
+            if _is_ignored_node(child):
+                continue
             nodes.append(child)
             walk_children(child, child.get("id"))
 
     for root in packet.get("nodes") or []:
         walk_children(root, root.get("id"))
     return nodes
+
+
+def _is_ignored_node(node: dict[str, Any]) -> bool:
+    if node.get("semantic_type") == "ignored_by_designer":
+        return True
+    if (node.get("unity_ignore") or {}).get("enabled"):
+        return True
+    metadata = node.get("source_metadata") if isinstance(node.get("source_metadata"), dict) else {}
+    tags = metadata.get("manual_tags") if metadata else None
+    if isinstance(tags, str):
+        values = re.split(r"[,\s]+", tags)
+    elif isinstance(tags, list):
+        values = tags
+    else:
+        values = []
+    return any(str(tag).strip().lower().lstrip("@#") == "ignore" for tag in values)
 
 
 def _file_id(packet_id: str, node_id: str, kind: str, used: set[int]) -> int:
@@ -1978,9 +2363,19 @@ def _normalize_tmp_font_asset_map(value: dict[str, str] | str | None) -> dict[st
         raw = json.loads(value)
     if not isinstance(raw, dict):
         raise ValueError("tmp_font_asset_map must be a dict or a JSON object string.")
+    if isinstance(raw.get("figma_font_to_tmp"), dict):
+        raw = raw["figma_font_to_tmp"]
+    elif isinstance(raw.get("font_asset_map"), dict):
+        raw = raw["font_asset_map"]
+    elif isinstance(raw.get("tmp_font_asset_map"), dict):
+        raw = raw["tmp_font_asset_map"]
     result: dict[str, str] = {}
-    for key, guid in raw.items():
+    for key, entry in raw.items():
         key_text = str(key or "").strip()
+        if isinstance(entry, dict):
+            guid = entry.get("guid") or entry.get("tmp_font_asset_guid") or entry.get("unity_font_asset_guid")
+        else:
+            guid = entry
         guid_text = str(guid or "").strip().lower()
         if not key_text:
             continue

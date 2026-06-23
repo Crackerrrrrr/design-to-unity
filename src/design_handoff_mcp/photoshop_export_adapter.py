@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .asset_store import _image_size, sanitize_filename
-from .normalizer import _add_semantic, _apply_semantics, _enrich_assets, _hash, _semantic_summary, _unity_rect
+from .normalizer import _add_semantic, _apply_semantics, _enrich_assets, _hash, _semantic_summary, _unity_rect, attach_reusable_prefab_registry, enrich_delivery_metadata
 from .profiles import build_handoff_profiles
 from .psd_adapter import _attach_dropdown_hints, _attach_input_hints, _attach_layout_hints, _attach_mask_hint, _attach_radio_hints, _attach_scroll_hints, _attach_slider_hints, _attach_tab_hints, _attach_text_hints, _normalize_text_payload
 
@@ -263,6 +263,7 @@ def make_photoshop_export_packet(
     _attach_tab_hints(root_node, warnings)
     _attach_radio_hints(root_node, warnings)
     _enrich_assets(assets, root_node, design_info)
+    enrich_delivery_metadata(root_node, design_info, assets, provider="photoshop_export")
     packet = {
         "packet_id": packet_id,
         "source": {
@@ -291,6 +292,7 @@ def make_photoshop_export_packet(
         },
     }
     packet["asset_download"] = packet["asset_export"]
+    attach_reusable_prefab_registry(packet)
     return packet
 
 
@@ -798,6 +800,7 @@ def _register_export_asset(
     asset_id = "asset_" + hashlib.sha1(local_text.encode("utf-8")).hexdigest()[:12]
     safe = sanitize_filename(name, asset_id)
     if asset_id not in assets:
+        content_hash = _file_sha1(local_path)
         assets[asset_id] = {
             "id": asset_id,
             "name": safe,
@@ -805,6 +808,8 @@ def _register_export_asset(
             "type": "image",
             "remote_url": None,
             "local_path": local_text,
+            "content_hash": content_hash,
+            "file_hash": content_hash,
             "suggested_unity_path": f"Assets/DesignToUnity/Sprites/{local_path.name}",
             "format": local_path.suffix.lstrip(".").lower() or "png",
             "size": _image_size(local_path),

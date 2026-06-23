@@ -14,6 +14,8 @@ from .normalizer import (
     _hash,
     _semantic_summary,
     _unity_rect,
+    attach_reusable_prefab_registry,
+    enrich_delivery_metadata,
 )
 from .profiles import build_handoff_profiles
 
@@ -240,6 +242,7 @@ def make_psd_packet(
     _attach_tab_hints(root_node, warnings)
     _attach_radio_hints(root_node, warnings)
     _enrich_assets(assets, root_node, design_info)
+    enrich_delivery_metadata(root_node, design_info, assets, provider="psd")
     packet = {
         "packet_id": packet_id,
         "source": {
@@ -269,6 +272,7 @@ def make_psd_packet(
         },
     }
     packet["asset_download"] = packet["asset_export"]
+    attach_reusable_prefab_registry(packet)
     return packet
 
 
@@ -716,6 +720,7 @@ def _register_local_asset(
     asset_id = "asset_" + hashlib.sha1(local_text.encode("utf-8")).hexdigest()[:12]
     safe = sanitize_filename(name, asset_id)
     if asset_id not in assets:
+        content_hash = _file_sha1(local_path)
         assets[asset_id] = {
             "id": asset_id,
             "name": safe,
@@ -723,6 +728,8 @@ def _register_local_asset(
             "type": "image",
             "remote_url": None,
             "local_path": local_text,
+            "content_hash": content_hash,
+            "file_hash": content_hash,
             "suggested_unity_path": f"Assets/DesignToUnity/Sprites/{local_path.name}",
             "format": "png",
             "size": _image_size(local_path),
@@ -1001,11 +1008,11 @@ def _attach_slider_hints(root: dict[str, Any], warnings: list[dict[str, Any]]) -
         }
 
         if fill and fill.get("id") in lookup:
-            _add_semantic_to_node(fill, "slider_fill_candidate", 0.9, ["child is likely Slider fill rect"])
+            _add_semantic_to_node(fill, "slider_fill_candidate", 0.96, ["child is likely Slider fill rect"])
         if handle and handle.get("id") in lookup:
-            _add_semantic_to_node(handle, "slider_handle_candidate", 0.9, ["child is likely Slider handle rect"])
+            _add_semantic_to_node(handle, "slider_handle_candidate", 0.96, ["child is likely Slider handle rect"])
         if track and track.get("id") in lookup:
-            _add_semantic_to_node(track, "slider_track_candidate", 0.82, ["child is likely Slider track/background rect"])
+            _add_semantic_to_node(track, "slider_track_candidate", 0.94, ["child is likely Slider track/background rect"])
 
         if requires_review:
             warnings.append(
