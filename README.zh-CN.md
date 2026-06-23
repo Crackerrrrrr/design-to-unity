@@ -2,11 +2,26 @@
 
 [GitHub 仓库](https://github.com/Crackerrrrrr/design-to-unity) · `Crackerrrrrr/design-to-unity`
 
+<p align="center">
+  <img src="docs/assets/design-to-unity-flow.svg" alt="Design to Unity 工作流配图" width="100%">
+</p>
+
 Design to Unity 是一个面向游戏 UI 落地的 MCP 服务。它可以把蓝湖设计稿、Figma 文件、PSD / PSB 文件，以及 Photoshop / UXP 导出物转换成结构化的设计实现数据包、资源清单和 Unity 可导入的 UGUI 预制体 YAML 快照。
 
 针对 Figma 工作流，它可以读取在线 Figma 文件、Frame、Component、Instance、本地 JSON snapshot 或插件导出物，保留 Auto Layout、constraints、文本、图片填充、组件关系、variants、variables、prototype reactions 和复杂视觉风险信息，再输出给 Unity MCP、静态 prefab YAML 或 Unity Editor importer 继续落地。
 
 它的核心目标不是替代 Unity 编辑器，而是给 AI 和 Unity MCP 提供足够完整、低歧义的设计信息，让设计稿可以更稳定地复原为可检查、可继续加工的 Unity UI。
+
+## 我们的优势
+
+| 优势 | 对项目落地的价值 |
+| --- | --- |
+| 统一设计数据包 | 蓝湖、Figma、PSD / PSB 和插件导出物都会进入同一套 AI 可读 packet，避免每个来源单独维护一套转换逻辑。 |
+| AI 更容易理解设计 | 每个关键节点都能暴露坐标、文本、资源、组件提示、渲染策略、语义来源、置信度和判断原因。 |
+| 面向 Unity，但不被 Unity 绑定 | 中间层保持跨引擎可复用，Unity 侧再输出 prefab YAML、source map、TMP 文本、UGUI hint 和 Editor importer。 |
+| 默认考虑复用和去重 | 通过图片 hash、Figma imageRef、组件 key、reusable prefab、variant 和 9-slice hint，减少重复资源和重复搭 UI。 |
+| 更适合持续迭代 | readiness report、source map、增量导入保护和 visual diff 让生成结果更容易检查、更新和回归。 |
+| 专门面向游戏 UI | Button、Slider、Toggle、ScrollView、List、Tab、Input、Dropdown、LayoutGroup、Mask、Canvas 等 UI 语义是一等能力。 |
 
 ## 主要能力
 

@@ -4,6 +4,10 @@
 
 [GitHub Repository](https://github.com/Crackerrrrrr/design-to-unity) · `Crackerrrrrr/design-to-unity`
 
+<p align="center">
+  <img src="docs/assets/design-to-unity-flow.svg" alt="Design to Unity workflow diagram" width="100%">
+</p>
+
 Design to Unity is an MCP server for turning Lanhu, Figma, and PSD / Photoshop UI designs into structured handoff packets, downloadable assets, and Unity-ready UGUI prefab YAML snapshots.
 
 For Figma teams, it acts as a bridge between design files and game UI production: the MCP can read Figma files, frames, components, local snapshots, or plugin exports; preserve layout, text, assets, component relationships, variants, variables, prototype reactions, and visual-risk metadata; then produce Unity source maps, prefab YAML, and Unity Editor importer input that AI agents or Unity tooling can continue from.
@@ -15,6 +19,17 @@ The server is built for an AI-assisted UI implementation workflow:
 - optionally write a static UGUI prefab YAML directly for quick inspection
 - keep source maps and verification metadata beside generated prefabs
 - keep Figma-specific intent such as Auto Layout, constraints, component instances, variants, and image fills available for Unity reconstruction
+
+## Why Design to Unity
+
+| Advantage | What it means in production |
+| --- | --- |
+| Unified design packet | Lanhu, Figma, PSD / PSB, and plugin exports all become the same AI-readable handoff format instead of separate one-off converters. |
+| Better context for AI agents | Every important node can expose geometry, text, assets, component hints, render strategy, source semantics, confidence, and reasons. |
+| Unity-ready but not Unity-locked | The packet is engine-neutral, while Unity output gets practical prefab YAML, source maps, TMP text, UGUI hints, and Editor importer support. |
+| Reuse by default | Image hashes, Figma image refs, component keys, reusable prefab candidates, variants, and 9-slice hints reduce duplicate assets and repeated UI work. |
+| Safer iteration | Readiness reports, source maps, incremental importer protection, and visual diff support make generated UI easier to inspect and update. |
+| Designed for game UI | Button, slider, toggle, scroll view, list, tab, input, dropdown, layout group, mask, and canvas hints are first-class conversion targets. |
 
 ## Features
 

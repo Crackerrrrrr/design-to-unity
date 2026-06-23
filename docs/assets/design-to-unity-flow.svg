@@ -1,0 +1,115 @@
+<svg width="1120" height="520" viewBox="0 0 1120 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Design to Unity workflow</title>
+  <desc id="desc">A product workflow diagram showing Lanhu, Figma, and PSD inputs flowing into a unified Design Implementation Packet and then into Unity prefab outputs.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1120" y2="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B1020"/>
+      <stop offset="0.45" stop-color="#101827"/>
+      <stop offset="1" stop-color="#17202D"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="130" y1="90" x2="990" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22C55E"/>
+      <stop offset="0.52" stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <linearGradient id="packet" x1="390" y1="150" x2="730" y2="355" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#143A34"/>
+      <stop offset="1" stop-color="#20324B"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      .title { font: 700 42px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #F8FAFC; letter-spacing: 0; }
+      .subtitle { font: 500 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #CBD5E1; letter-spacing: 0; }
+      .label { font: 700 20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #F8FAFC; letter-spacing: 0; }
+      .small { font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #CBD5E1; letter-spacing: 0; }
+      .tiny { font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #94A3B8; letter-spacing: 0; }
+      .card { fill: rgba(15, 23, 42, 0.84); stroke: rgba(148, 163, 184, 0.28); stroke-width: 1; }
+      .soft { fill: rgba(30, 41, 59, 0.62); stroke: rgba(148, 163, 184, 0.22); stroke-width: 1; }
+    </style>
+  </defs>
+
+  <rect width="1120" height="520" rx="28" fill="url(#bg)"/>
+  <path d="M106 108C220 47 324 67 424 118C550 183 635 89 758 79C865 70 964 123 1027 196" stroke="url(#accent)" stroke-width="2" stroke-opacity="0.4"/>
+  <path d="M98 407C224 339 333 364 456 400C600 442 681 370 797 343C922 314 1010 352 1068 406" stroke="url(#accent)" stroke-width="2" stroke-opacity="0.28"/>
+
+  <text x="64" y="72" class="title">Design to Unity</text>
+  <text x="64" y="106" class="subtitle">AI-readable design packets, reusable assets, and Unity-ready UI prefabs.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="164" width="235" height="64" rx="16" class="card"/>
+    <circle cx="104" cy="196" r="18" fill="#22C55E" fill-opacity="0.18" stroke="#22C55E"/>
+    <text x="134" y="191" class="label">Lanhu</text>
+    <text x="134" y="211" class="small">slices, layout, notes</text>
+
+    <rect x="70" y="250" width="235" height="64" rx="16" class="card"/>
+    <circle cx="104" cy="282" r="18" fill="#38BDF8" fill-opacity="0.18" stroke="#38BDF8"/>
+    <text x="134" y="277" class="label">Figma</text>
+    <text x="134" y="297" class="small">components, variants, Auto Layout</text>
+
+    <rect x="70" y="336" width="235" height="64" rx="16" class="card"/>
+    <circle cx="104" cy="368" r="18" fill="#F59E0B" fill-opacity="0.18" stroke="#F59E0B"/>
+    <text x="134" y="363" class="label">PSD / PSB</text>
+    <text x="134" y="383" class="small">layers, text, raster assets</text>
+  </g>
+
+  <path d="M320 196H404" stroke="#64748B" stroke-width="2"/>
+  <path d="M320 282H404" stroke="#64748B" stroke-width="2"/>
+  <path d="M320 368H404" stroke="#64748B" stroke-width="2"/>
+  <path d="M397 189L411 196L397 203" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M397 275L411 282L397 289" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M397 361L411 368L397 375" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="420" y="142" width="300" height="286" rx="24" fill="url(#packet)" stroke="rgba(125, 211, 252, 0.32)" stroke-width="1.2"/>
+    <text x="454" y="188" class="label">Design Implementation Packet</text>
+    <text x="454" y="218" class="small">Unified handoff data for AI agents</text>
+    <text x="454" y="240" class="small">and engine importers.</text>
+
+    <rect x="454" y="258" width="232" height="34" rx="10" class="soft"/>
+    <text x="474" y="280" class="small">render_strategy</text>
+
+    <rect x="454" y="302" width="232" height="34" rx="10" class="soft"/>
+    <text x="474" y="324" class="small">visual_bounds / render_rect</text>
+
+    <rect x="454" y="346" width="232" height="34" rx="10" class="soft"/>
+    <text x="474" y="368" class="small">source_semantics</text>
+
+    <rect x="454" y="390" width="232" height="34" rx="10" class="soft"/>
+    <text x="474" y="412" class="small">assets, reuse, source maps</text>
+  </g>
+
+  <path d="M736 282H820" stroke="#64748B" stroke-width="2"/>
+  <path d="M813 275L827 282L813 289" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="840" y="164" width="220" height="64" rx="16" class="card"/>
+    <circle cx="874" cy="196" r="18" fill="#22C55E" fill-opacity="0.18" stroke="#22C55E"/>
+    <text x="904" y="191" class="label">Unity MCP</text>
+    <text x="904" y="211" class="small">scene and prefab actions</text>
+
+    <rect x="840" y="250" width="220" height="64" rx="16" class="card"/>
+    <circle cx="874" cy="282" r="18" fill="#38BDF8" fill-opacity="0.18" stroke="#38BDF8"/>
+    <text x="904" y="277" class="label">Editor Importer</text>
+    <text x="904" y="297" class="small">UGUI, TMP, nested prefabs</text>
+
+    <rect x="840" y="336" width="220" height="64" rx="16" class="card"/>
+    <circle cx="874" cy="368" r="18" fill="#F59E0B" fill-opacity="0.18" stroke="#F59E0B"/>
+    <text x="904" y="363" class="label">Prefab YAML</text>
+    <text x="904" y="383" class="small">quick review snapshots</text>
+  </g>
+
+  <g>
+    <rect x="64" y="448" width="992" height="40" rx="12" fill="rgba(15, 23, 42, 0.72)" stroke="rgba(148, 163, 184, 0.18)"/>
+    <text x="92" y="473" class="tiny">Reusable components</text>
+    <circle cx="232" cy="468" r="4" fill="#22C55E"/>
+    <text x="252" y="473" class="tiny">Asset deduplication</text>
+    <circle cx="398" cy="468" r="4" fill="#38BDF8"/>
+    <text x="418" y="473" class="tiny">Source-map traceability</text>
+    <circle cx="594" cy="468" r="4" fill="#F59E0B"/>
+    <text x="614" y="473" class="tiny">Readiness and visual diff</text>
+    <circle cx="824" cy="468" r="4" fill="#A78BFA"/>
+    <text x="844" y="473" class="tiny">AI-friendly semantic evidence</text>
+  </g>
+</svg>
