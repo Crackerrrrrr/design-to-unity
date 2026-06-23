@@ -1,5 +1,7 @@
 # Design to Unity
 
+[中文介绍](README.zh-CN.md)
+
 [GitHub Repository](https://github.com/Crackerrrrrr/design-to-unity) · `Crackerrrrrr/design-to-unity`
 
 Design to Unity is an MCP server for turning Lanhu and PSD / Photoshop UI designs into structured handoff packets, downloadable assets, and Unity-ready UGUI prefab YAML snapshots.
