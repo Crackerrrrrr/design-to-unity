@@ -1,6 +1,8 @@
 # Design to Unity
 
-This MCP server extracts Lanhu design pages into platform-neutral Design Implementation Packets.
+[GitHub Repository](https://github.com/Crackerrrrrr/design-to-unity) · `Crackerrrrrr/design-to-unity`
+
+Design-to-Unity MCP turns Lanhu and PSD / Photoshop UI designs into structured handoff packets, downloaded assets, and Unity-ready UGUI prefab YAML snapshots.
 
 The default flow is information-first: it provides structured design facts, downloaded assets, and target handoff profiles so an AI assistant can call the proper target-platform MCP to implement the UI.
 
