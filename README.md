@@ -6,18 +6,22 @@
 
 Design to Unity is an MCP server for turning Lanhu, Figma, and PSD / Photoshop UI designs into structured handoff packets, downloadable assets, and Unity-ready UGUI prefab YAML snapshots.
 
+For Figma teams, it acts as a bridge between design files and game UI production: the MCP can read Figma files, frames, components, local snapshots, or plugin exports; preserve layout, text, assets, component relationships, variants, variables, prototype reactions, and visual-risk metadata; then produce Unity source maps, prefab YAML, and Unity Editor importer input that AI agents or Unity tooling can continue from.
+
 The server is built for an AI-assisted UI implementation workflow:
 
 - expose design structure, positions, text, assets, and semantic hints through MCP tools
 - prepare Unity handoff data that another Unity MCP can consume
 - optionally write a static UGUI prefab YAML directly for quick inspection
 - keep source maps and verification metadata beside generated prefabs
+- keep Figma-specific intent such as Auto Layout, constraints, component instances, variants, and image fills available for Unity reconstruction
 
 ## Features
 
 - Lanhu project and design-page extraction
 - Figma file/frame/component extraction through REST API or local JSON snapshots
 - batch Figma page/component-library packet preparation and prefab YAML writing
+- Figma plugin export ingestion for selected frames/components, embedded preview images, manual semantic tags, and rendered complex visual assets
 - local PSD / PSB packet preparation
 - Photoshop / UXP export-folder ingestion
 - asset manifest and slice metadata
@@ -38,6 +42,16 @@ The server is built for an AI-assisted UI implementation workflow:
 - static prefab YAML verification
 - optional Unity Editor validator script installation
 - visual diff helper for comparing Unity screenshots with Figma / PSD design references
+
+## Figma To Unity Workflow
+
+The Figma pipeline is designed for more than screenshot restoration:
+
+- REST API mode reads live Figma files, pages, frames, components, styles, variables, image fills, and export URLs.
+- Snapshot mode lets teams run local regression tests without depending on network access.
+- Plugin export mode captures the current Figma selection, manual semantic tags, preview PNGs, and complex vector/image assets that should be rasterized.
+- The packet preserves `render_strategy`, `render_rect`, `visual_bounds`, `source_semantics`, Auto Layout hints, constraints, text metadata, and reusable prefab candidates.
+- Unity output can be generated as quick prefab YAML or imported through `DesignToUnityPrefabImporter.cs` for Editor API based prefab creation, reusable definitions, nested instances, and variant prefab assets.
 
 Supported Unity UI component hints include:
 
