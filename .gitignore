@@ -10,3 +10,10 @@ logs/
 .env
 .DS_Store
 
+# Local planning, design notes, and verification artifacts.
+/设计方案.md
+/Unity导出规范.md
+/PSD到Unity预制体扩展方案.md
+/下一步计划.md
+/tests/
+/templates/photoshop-uxp-exporter/sample-design.json
