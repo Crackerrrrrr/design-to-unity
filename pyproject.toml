@@ -7,7 +7,37 @@ name = "design-to-unity"
 version = "0.1.0"
 description = "MCP server that turns design sources into Unity-ready design implementation packets and prefabs."
 readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Design to Unity contributors" }
+]
 requires-python = ">=3.10"
+keywords = [
+  "mcp",
+  "model-context-protocol",
+  "unity",
+  "ugui",
+  "figma",
+  "lanhu",
+  "psd",
+  "photoshop",
+  "design-to-code",
+  "game-ui"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Software Development :: User Interfaces"
+]
 dependencies = [
   "fastmcp>=2.0.0",
   "httpx>=0.27.0",
@@ -20,11 +50,53 @@ dependencies = [
 DesignToUnity = "design_handoff_mcp.server:main"
 design-to-unity = "design_handoff_mcp.server:main"
 
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.0",
+  "jsonschema>=4.0.0",
+  "pytest>=8.0.0",
+  "twine>=5.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/Crackerrrrrr/design-to-unity"
+Repository = "https://github.com/Crackerrrrrr/design-to-unity"
+Issues = "https://github.com/Crackerrrrrr/design-to-unity/issues"
+Changelog = "https://github.com/Crackerrrrrr/design-to-unity/blob/main/CHANGELOG.md"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 design_handoff_mcp = ["templates/unity_editor/*.cs"]
+
+[tool.setuptools.data-files]
+"share/design-to-unity" = [
+  ".env.example",
+  "CHANGELOG.md",
+  "llms.txt",
+  "run-stdio.sh",
+  "server.json"
+]
+"share/design-to-unity/docs/assets" = [
+  "docs/assets/design-to-unity-flow.svg"
+]
+"share/design-to-unity/docs" = [
+  "docs/launch-kit.md",
+  "docs/publishing.md"
+]
+"share/design-to-unity/templates/figma-plugin-exporter" = [
+  "templates/figma-plugin-exporter/README.md",
+  "templates/figma-plugin-exporter/code.js",
+  "templates/figma-plugin-exporter/manifest.json",
+  "templates/figma-plugin-exporter/ui.html"
+]
+"share/design-to-unity/templates/photoshop-uxp-exporter" = [
+  "templates/photoshop-uxp-exporter/README.md",
+  "templates/photoshop-uxp-exporter/index.html",
+  "templates/photoshop-uxp-exporter/index.js",
+  "templates/photoshop-uxp-exporter/manifest.json"
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

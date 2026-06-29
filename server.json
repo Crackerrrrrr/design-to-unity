@@ -1,0 +1,61 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.crackerrrrrr/design-to-unity",
+  "title": "Design to Unity",
+  "description": "Convert Lanhu, Figma, PSD, and Photoshop UI designs into Unity UGUI handoff data.",
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/Crackerrrrrr/design-to-unity",
+  "repository": {
+    "url": "https://github.com/Crackerrrrrr/design-to-unity",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "design-to-unity",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MCP_TRANSPORT",
+          "value": "stdio",
+          "description": "Run Design to Unity as a stdio MCP server."
+        },
+        {
+          "name": "LANHU_COOKIE",
+          "description": "Lanhu request Cookie header value for private Lanhu project access.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "DDS_COOKIE",
+          "description": "Optional DDS cookie. Defaults to LANHU_COOKIE when omitted.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "FIGMA_TOKEN",
+          "description": "Figma personal access token for private Figma files.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "FIGMA_OAUTH_TOKEN",
+          "description": "Optional Figma OAuth token. Used instead of FIGMA_TOKEN when provided.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "DATA_DIR",
+          "description": "Local packet and asset cache directory.",
+          "format": "filepath",
+          "default": "./data",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

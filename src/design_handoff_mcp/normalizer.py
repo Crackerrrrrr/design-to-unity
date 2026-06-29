@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -97,6 +99,7 @@ def make_packet(
         if node:
             root_node["children"].append(node)
 
+    _apply_lanhu_scroll_viewport_hint(root_node, design_info, warnings)
     _enrich_assets(asset_registry, root_node, design_info)
     enrich_delivery_metadata(root_node, design_info, asset_registry, provider="lanhu")
     assets = list(asset_registry.values())
@@ -124,14 +127,194 @@ def make_packet(
     return packet
 
 
+def _apply_lanhu_scroll_viewport_hint(root_node: dict[str, Any], design_info: dict[str, Any], warnings: list[dict[str, Any]]) -> None:
+    content_width = _num(design_info.get("width")) or 0
+    content_height = _num(design_info.get("height")) or 0
+    scale = _num(design_info.get("scale")) or 1
+    physical_width = content_width * scale
+    physical_height = content_height * scale
+    viewport_physical_height = _infer_lanhu_viewport_physical_height(physical_width, physical_height)
+    if not viewport_physical_height:
+        return
+
+    viewport_height = round(viewport_physical_height / scale, 2)
+    if content_height <= viewport_height + 2:
+        return
+
+    bottom = _max_node_bottom(root_node)
+    if bottom <= viewport_height + 2:
+        return
+
+    viewport_rect = {"x": 0, "y": 0, "width": round(content_width, 2), "height": viewport_height}
+    content_rect = {"x": 0, "y": 0, "width": round(content_width, 2), "height": round(content_height, 2)}
+    scroll_info = {
+        "required": True,
+        "direction": "vertical",
+        "source": "lanhu_long_artboard",
+        "preferred_unity_scope": "prefab_internal_scroll_area",
+        "reason": "Lanhu DDS content height exceeds the inferred device viewport height.",
+        "viewport_rect": viewport_rect,
+        "content_rect": content_rect,
+        "overflow": {"bottom": round(content_height - viewport_height, 2)},
+        "viewport_physical_size": {
+            "width": round(physical_width, 2),
+            "height": round(viewport_physical_height, 2),
+        },
+        "content_physical_size": {
+            "width": round(physical_width, 2),
+            "height": round(physical_height, 2),
+        },
+    }
+    design_info["viewport"] = {
+        "x": 0,
+        "y": 0,
+        "width": round(content_width, 2),
+        "height": viewport_height,
+        "physical_width": round(physical_width, 2),
+        "physical_height": round(viewport_physical_height, 2),
+        "inferred": True,
+        "source": "lanhu_common_device_viewport",
+    }
+    design_info["scroll"] = scroll_info
+    root_node["unity_scroll_hint"] = {
+        "can_add_scroll_rect": True,
+        "default_add_scroll_rect": True,
+        "direction": "vertical",
+        "viewport_node_id": "viewport",
+        "content_node_id": "content",
+        "viewport_rect": viewport_rect,
+        "content_rect": content_rect,
+        "movement_type": "clamped",
+        "requires_review": False,
+        "source": "lanhu_long_artboard",
+        "preferred_unity_scope": "prefab_internal_scroll_area",
+        "notes": [
+            "Create the ScrollRect inside the generated prefab rather than wrapping the prefab externally in the scene.",
+            "Infer fixed header/footer regions from top-level layout, then place the overflowing content nodes under ScrollRect Content.",
+            "Do not crop nodes below viewport_rect; they are scrollable content.",
+        ],
+    }
+    warnings.append(
+        {
+            "node_id": "root",
+            "code": "lanhu_long_artboard_scroll_candidate",
+            "severity": "info",
+            "message": (
+                "Lanhu content is taller than the inferred device viewport; expose it as vertical scroll content "
+                f"({round(physical_width)}x{round(physical_height)} content, {round(physical_width)}x{round(viewport_physical_height)} viewport)."
+            ),
+        }
+    )
+
+
+def _infer_lanhu_viewport_physical_height(physical_width: float, physical_height: float) -> float | None:
+    if physical_width <= 0 or physical_height <= 0:
+        return None
+    if 700 <= physical_width <= 760 and physical_height > 1700:
+        return 1559.0
+    return None
+
+
+def _max_node_bottom(root_node: dict[str, Any]) -> float:
+    max_bottom = 0.0
+
+    def walk(node: dict[str, Any]) -> None:
+        nonlocal max_bottom
+        rect = _rect_or_empty(node.get("global_rect"))
+        max_bottom = max(max_bottom, rect["y"] + rect["height"])
+        for child in node.get("children") or []:
+            if isinstance(child, dict):
+                walk(child)
+
+    walk(root_node)
+    return round(max_bottom, 2)
+
+
+def apply_lanhu_reused_background_assets(packet: dict[str, Any]) -> dict[str, Any]:
+    source = packet.get("source") or {}
+    if str(source.get("provider") or "").lower() != "lanhu":
+        return {"applied_count": 0, "items": []}
+    roots = packet.get("nodes") or []
+    if not roots:
+        return {"applied_count": 0, "items": []}
+    assets = {asset.get("id"): asset for asset in packet.get("assets") or [] if asset.get("id")}
+    applied: list[dict[str, Any]] = []
+
+    def walk(parent: dict[str, Any]) -> None:
+        children = [child for child in parent.get("children") or [] if isinstance(child, dict)]
+        row_nodes = [child for child in children if _is_lanhu_reusable_background_row(child)]
+        source_rows = [_background_source_row(child, assets) for child in row_nodes if child.get("asset_ref")]
+        source_rows = [item for item in source_rows if item]
+        target_rows = [child for child in row_nodes if not child.get("asset_ref") and _style_rgb(child) is not None]
+        for target in target_rows:
+            target_rgb = _style_rgb(target)
+            if target_rgb is None:
+                continue
+            compatible = [source_row for source_row in source_rows if _similar_size(target.get("global_rect"), source_row["node"].get("global_rect"))]
+            if not compatible:
+                continue
+            best = min(compatible, key=lambda source_row: _rgb_distance(target_rgb, source_row["rgb"]))
+            if _rgb_distance(target_rgb, best["rgb"]) > 90:
+                continue
+            previous_type = target.get("type")
+            target["asset_ref"] = best["node"].get("asset_ref")
+            target["type"] = "image"
+            target["source_metadata"] = dict(target.get("source_metadata") or {})
+            target["source_metadata"].update(
+                {
+                    "inferred_reused_background_asset": True,
+                    "reused_background_source_node_id": best["node"].get("id"),
+                    "reused_background_source_asset_ref": best["node"].get("asset_ref"),
+                    "reused_background_match": {
+                        "target_rgb": list(target_rgb),
+                        "source_rgb": list(best["rgb"]),
+                        "distance": round(_rgb_distance(target_rgb, best["rgb"]), 2),
+                    },
+                    "original_type_before_background_reuse": previous_type,
+                }
+            )
+            target.setdefault("semantic_reasons", [])
+            target["semantic_reasons"] = sorted(set([*target["semantic_reasons"], "reused a same-size Lanhu row background sprite inferred from style color"]))
+            target["content_hash"] = _hash({"rect": target.get("global_rect"), "style": target.get("style"), "asset_ref": target.get("asset_ref")})
+            applied.append(
+                {
+                    "node_id": target.get("id"),
+                    "source_node_id": best["node"].get("id"),
+                    "asset_ref": target.get("asset_ref"),
+                    "target_rgb": list(target_rgb),
+                    "source_rgb": list(best["rgb"]),
+                }
+            )
+        for child in children:
+            walk(child)
+
+    for root in roots:
+        walk(root)
+
+    if applied:
+        packet.setdefault("warnings", []).append(
+            {
+                "node_id": None,
+                "code": "lanhu_reused_background_assets_inferred",
+                "severity": "info",
+                "message": f"Inferred {len(applied)} Lanhu style-only background nodes that reuse downloaded same-size background sprites.",
+            }
+        )
+        asset_lookup = {asset.get("id"): asset for asset in packet.get("assets") or [] if asset.get("id")}
+        _enrich_assets(asset_lookup, roots[0], packet.get("design") or {})
+        enrich_delivery_metadata(roots[0], packet.get("design") or {}, asset_lookup, provider="lanhu")
+    packet["lanhu_reused_background_assets"] = {"applied_count": len(applied), "items": applied}
+    return packet["lanhu_reused_background_assets"]
+
+
 def _packet_id(project_id: str, design_id: str | None, version_id: str) -> str:
     raw = f"lanhu:{project_id}:{design_id}:{version_id}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
 
 
 def _design_info(design: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    width = _num(design.get("width")) or _num(_lookup(payload, ["artboard.frame.width", "board.width", "props.style.width"]))
-    height = _num(design.get("height")) or _num(_lookup(payload, ["artboard.frame.height", "board.height", "props.style.height"]))
+    width = _num(design.get("width")) or _num(_lookup(payload, ["artboard.frame.width", "board.width", "style.width", "props.style.width"]))
+    height = _num(design.get("height")) or _num(_lookup(payload, ["artboard.frame.height", "board.height", "style.height", "props.style.height"]))
     scale = _detect_scale(payload, width, height)
     if scale and scale > 1 and width and height and _looks_like_raw_canvas(payload, width, height):
         width = round(width / scale, 1)
@@ -148,8 +331,8 @@ def _design_info(design: dict[str, Any], payload: dict[str, Any]) -> dict[str, A
 
 
 def _detect_scale(payload: dict[str, Any], width: float | None, height: float | None) -> float:
-    raw_w = _num(_lookup(payload, ["artboard.frame.width", "board.width", "props.style.width"]))
-    raw_h = _num(_lookup(payload, ["artboard.frame.height", "board.height", "props.style.height"]))
+    raw_w = _num(_lookup(payload, ["artboard.frame.width", "board.width", "style.width", "props.style.width"]))
+    raw_h = _num(_lookup(payload, ["artboard.frame.height", "board.height", "style.height", "props.style.height"]))
     if raw_w and width and raw_w > width:
         ratio = raw_w / width
         if 0.75 <= ratio <= 8:
@@ -168,7 +351,7 @@ def _detect_scale(payload: dict[str, Any], width: float | None, height: float | 
 
 
 def _looks_like_raw_canvas(payload: dict[str, Any], width: float | None, height: float | None) -> bool:
-    board_w = _num(_lookup(payload, ["artboard.frame.width", "board.width"]))
+    board_w = _num(_lookup(payload, ["artboard.frame.width", "board.width", "style.width", "props.style.width"]))
     return bool(board_w and width and abs(board_w - width) < 1 and width >= 700)
 
 
@@ -314,12 +497,14 @@ def _node_type(layer: dict[str, Any]) -> str:
 
 def _rect_of(layer: dict[str, Any]) -> dict[str, float]:
     frame = layer.get("frame") or layer.get("realFrame") or {}
-    style = (layer.get("props") or {}).get("style") or {}
+    row_dims = layer.get("rowDims") or {}
+    style = layer.get("style") or {}
+    props_style = (layer.get("props") or {}).get("style") or {}
     return {
-        "x": _num(frame.get("x"), frame.get("left"), layer.get("x"), layer.get("left"), style.get("left")) or 0,
-        "y": _num(frame.get("y"), frame.get("top"), layer.get("y"), layer.get("top"), style.get("top")) or 0,
-        "width": _num(frame.get("width"), layer.get("width"), style.get("width")) or 0,
-        "height": _num(frame.get("height"), layer.get("height"), style.get("height")) or 0,
+        "x": _num(frame.get("x"), frame.get("left"), row_dims.get("x"), row_dims.get("left"), layer.get("x"), layer.get("left"), style.get("left"), props_style.get("left")) or 0,
+        "y": _num(frame.get("y"), frame.get("top"), row_dims.get("y"), row_dims.get("top"), layer.get("y"), layer.get("top"), style.get("top"), props_style.get("top")) or 0,
+        "width": _num(frame.get("width"), row_dims.get("width"), layer.get("width"), style.get("width"), props_style.get("width")) or 0,
+        "height": _num(frame.get("height"), row_dims.get("height"), layer.get("height"), style.get("height"), props_style.get("height")) or 0,
     }
 
 
@@ -348,15 +533,16 @@ def _unity_rect(rect: dict[str, float]) -> dict[str, Any]:
 
 
 def _style_info(layer: dict[str, Any], scale: float, warnings: list[dict[str, Any]], node_id: str) -> dict[str, Any]:
-    style = (layer.get("props") or {}).get("style") or {}
+    style = layer.get("style") or {}
+    props_style = (layer.get("props") or {}).get("style") or {}
     fill_color = _color_value(
-        _lookup(layer, ["fill.color", "style.fills.0.color", "fills.0.color"]) or style.get("backgroundColor")
+        _lookup(layer, ["fill.color", "style.fills.0.color", "fills.0.color"]) or style.get("backgroundColor") or props_style.get("backgroundColor")
     )
     opacity = _opacity(layer)
     result = {
         "opacity": opacity,
         "fill_color": fill_color,
-        "corner_radius": _scaled_num(_lookup(layer, ["radius", "cornerRadius", "props.style.borderRadius"]), scale),
+        "corner_radius": _scaled_num(_lookup(layer, ["radius", "cornerRadius", "style.borderRadius", "props.style.borderRadius"]), scale),
         "border": _border(layer, scale),
         "shadow": _shadow(layer, scale),
     }
@@ -386,7 +572,7 @@ def _text_info(layer: dict[str, Any], scale: float) -> dict[str, Any] | None:
     art_text = layer.get("text")
     props = layer.get("props") or {}
     data = layer.get("data") or {}
-    style = props.get("style") or {}
+    style = {**(props.get("style") or {}), **(layer.get("style") or {})}
 
     content = None
     source_style: dict[str, Any] = {}
@@ -402,10 +588,11 @@ def _text_info(layer: dict[str, Any], scale: float) -> dict[str, Any] | None:
 
     if content is None:
         return None
+    normalized_content = _clean_text_content(str(content))
 
     return {
-        "content": str(content),
-        "font_family": source_style.get("fontPostScriptName") or source_style.get("fontName") or source_style.get("name"),
+        "content": normalized_content,
+        "font_family": source_style.get("fontPostScriptName") or source_style.get("fontName") or source_style.get("fontFamily") or source_style.get("name"),
         "font_size": _scaled_num(source_style.get("size") or style.get("fontSize"), scale),
         "font_weight": source_style.get("fontWeight") or _font_weight(source_style.get("fontStyleName") or source_style.get("type")),
         "color": _color_value(source_style.get("color") or style.get("color")),
@@ -413,8 +600,14 @@ def _text_info(layer: dict[str, Any], scale: float) -> dict[str, Any] | None:
         "line_height": _scaled_num(_lookup(source_style, ["lineHeight.value", "leading"]) or style.get("lineHeight"), scale),
         "letter_spacing": source_style.get("tracking") or style.get("letterSpacing") or 0,
         "overflow": "clip",
-        "wrap": "\n" in str(content),
+        "wrap": "\n" in normalized_content,
     }
+
+
+def _clean_text_content(value: str) -> str:
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", value, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    return html.unescape(text).replace("\xa0", " ")
 
 
 def _image_url(layer: dict[str, Any]) -> str | None:
@@ -422,6 +615,9 @@ def _image_url(layer: dict[str, Any]) -> str | None:
     dds_image = layer.get("ddsImage") or {}
     images = layer.get("images") or {}
     data = layer.get("data") or {}
+    props = layer.get("props") or {}
+    style = layer.get("style") or {}
+    props_style = props.get("style") or {}
     value = data.get("value")
     for candidate in (
         image.get("imageUrl"),
@@ -429,11 +625,32 @@ def _image_url(layer: dict[str, Any]) -> str | None:
         dds_image.get("imageUrl"),
         images.get("png_xxxhd"),
         images.get("svg"),
+        props.get("src"),
         value if isinstance(value, str) and value.startswith("http") else None,
+        style.get("backgroundImage"),
+        props_style.get("backgroundImage"),
+        style.get("background"),
+        props_style.get("background"),
     ):
-        if candidate:
-            return str(candidate)
+        cleaned = _clean_image_url(candidate)
+        if cleaned:
+            return cleaned
     return None
+
+
+def _clean_image_url(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.startswith("url("):
+        raw = raw[4:].strip()
+        if raw.endswith(")"):
+            raw = raw[:-1].strip()
+        raw = raw.strip("\"'")
+    match = re.search(r"https?://[^\s)'\"<>]+", raw)
+    return match.group(0) if match else None
 
 
 def _register_asset(
@@ -962,6 +1179,93 @@ def _add_semantic(candidates: list[dict[str, Any]], semantic_type: str, confiden
             "reasons": clean_reasons,
         }
     )
+
+
+def _is_lanhu_reusable_background_row(node: dict[str, Any]) -> bool:
+    rect = _rect_or_empty(node.get("global_rect"))
+    width = rect["width"]
+    height = rect["height"]
+    return bool(
+        node.get("children")
+        and width > 0
+        and height > 0
+        and width >= height * 3
+        and 8 <= height <= 80
+    )
+
+
+def _background_source_row(node: dict[str, Any], assets: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    asset = assets.get(str(node.get("asset_ref") or ""))
+    if not asset:
+        return None
+    rgb = _asset_main_rgb(asset)
+    if rgb is None:
+        return None
+    return {"node": node, "asset": asset, "rgb": rgb}
+
+
+def _asset_main_rgb(asset: dict[str, Any]) -> tuple[int, int, int] | None:
+    local_path = str(asset.get("local_path") or "")
+    if not local_path:
+        return None
+    path = Path(local_path).expanduser()
+    if not path.exists():
+        return None
+    try:
+        from PIL import Image
+
+        image = Image.open(path).convert("RGBA")
+    except Exception:
+        return None
+    width, height = image.size
+    if not width or not height:
+        return None
+    left = int(width * 0.28)
+    right = max(left + 1, int(width * 0.95))
+    top = int(height * 0.2)
+    bottom = max(top + 1, int(height * 0.8))
+    pixels = []
+    for _, _, r, g, b, a in _iter_rgba_pixels(image.crop((left, top, right, bottom))):
+        if a > 32:
+            pixels.append((r, g, b))
+    if not pixels:
+        return None
+    return tuple(round(sum(pixel[index] for pixel in pixels) / len(pixels)) for index in range(3))  # type: ignore[return-value]
+
+
+def _iter_rgba_pixels(image: Any):
+    width, height = image.size
+    data = image.load()
+    for y in range(height):
+        for x in range(width):
+            r, g, b, a = data[x, y]
+            yield x, y, r, g, b, a
+
+
+def _style_rgb(node: dict[str, Any]) -> tuple[int, int, int] | None:
+    style = node.get("style") if isinstance(node.get("style"), dict) else {}
+    return _parse_rgb(style.get("fill_color"))
+
+
+def _parse_rgb(value: Any) -> tuple[int, int, int] | None:
+    if not isinstance(value, str):
+        return None
+    numbers = [float(item) for item in re.findall(r"-?\d+(?:\.\d+)?", value)]
+    if len(numbers) < 3:
+        return None
+    return tuple(max(0, min(255, round(numbers[index]))) for index in range(3))  # type: ignore[return-value]
+
+
+def _rgb_distance(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
+    return sum((a[index] - b[index]) ** 2 for index in range(3)) ** 0.5
+
+
+def _similar_size(a: Any, b: Any) -> bool:
+    rect_a = _rect_or_empty(a)
+    rect_b = _rect_or_empty(b)
+    width_tolerance = max(1.0, rect_a["width"] * 0.03)
+    height_tolerance = max(1.0, rect_a["height"] * 0.05)
+    return abs(rect_a["width"] - rect_b["width"]) <= width_tolerance and abs(rect_a["height"] - rect_b["height"]) <= height_tolerance
 
 
 def _enrich_assets(assets: dict[str, dict[str, Any]], root_node: dict[str, Any], design_info: dict[str, Any]) -> None:
@@ -2158,7 +2462,7 @@ def _color_value(value: Any) -> str | None:
 
 
 def _opacity(layer: dict[str, Any]) -> float:
-    raw = _lookup(layer, ["blendOptions.opacity.value", "opacity", "props.style.opacity"])
+    raw = _lookup(layer, ["blendOptions.opacity.value", "opacity", "style.opacity", "props.style.opacity"])
     number = _num(raw)
     if number is None:
         return 1

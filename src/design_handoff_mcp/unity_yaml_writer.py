@@ -62,14 +62,14 @@ def write_unity_prefab_yaml(
 
     packet_id = str(packet.get("packet_id") or "packet")
     design = packet.get("design") or {}
-    safe_packet = _safe_name(packet_id)
+    packet_folder = _packet_folder_name(packet)
     asset_root = asset_root.strip("/").replace("\\", "/")
     if not asset_root.startswith("Assets/"):
         raise ValueError("asset_root must be a Unity asset path under Assets/")
     normalized_visual_mode = _normalize_prefab_visual_mode(prefab_visual_mode)
 
-    sprite_asset_dir = f"{asset_root}/{safe_packet}/Sprites"
-    prefab_asset_dir = f"{asset_root}/{safe_packet}/Prefabs"
+    sprite_asset_dir = f"{asset_root}/{packet_folder}/Sprites"
+    prefab_asset_dir = f"{asset_root}/{packet_folder}/Prefabs"
     raw_prefab_name = str(prefab_name or f"{packet_id[:8]}_ViewRoot").strip()
     if raw_prefab_name.lower().endswith(".prefab"):
         raw_prefab_name = raw_prefab_name[:-7]
@@ -81,6 +81,7 @@ def write_unity_prefab_yaml(
 
     assets = {asset.get("id"): asset for asset in packet.get("assets") or [] if asset.get("id")}
     nodes = _unity_creation_order(packet)
+    nodes = _inject_internal_scroll_nodes(packet, nodes)
     if normalized_visual_mode == "flattened_reference_overlay":
         nodes = [_reference_overlay_node(packet, assets)] + nodes
     copied_assets, asset_guid_by_id, warnings = _write_sprite_assets(
@@ -414,12 +415,13 @@ def _build_prefab_yaml(
 ) -> tuple[str, dict[str, int], dict[str, Any]]:
     packet_id = str(packet.get("packet_id") or "packet")
     design = packet.get("design") or {}
+    root_rect = _prefab_root_rect(design)
     root = {
         "id": "root",
         "parent_id": None,
         "name": f"DesignToUnityView_{packet_id[:8]}",
         "unity_name_hint": f"DesignToUnityView_{packet_id[:8]}",
-        "local_rect": {"x": 0, "y": 0, "width": design.get("width") or 0, "height": design.get("height") or 0},
+        "local_rect": root_rect,
         "style": {"opacity": 1},
         "asset_ref": None,
         "semantic_type": "screen_root",
@@ -2272,7 +2274,7 @@ def _selectable_yaml(target_graphic: int | None, interactable: bool = True) -> l
 def _unity_creation_order(packet: dict[str, Any]) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
     provider = ((packet.get("source") or {}).get("provider") or "lanhu").lower()
-    reverse_siblings = provider != "psd"
+    reverse_siblings = provider == "figma"
 
     def walk_children(parent: dict[str, Any], parent_id: str | None) -> None:
         children = []
@@ -2290,6 +2292,195 @@ def _unity_creation_order(packet: dict[str, Any]) -> list[dict[str, Any]]:
     for root in packet.get("nodes") or []:
         walk_children(root, root.get("id"))
     return nodes
+
+
+def _prefab_root_rect(design: dict[str, Any]) -> dict[str, float]:
+    viewport = design.get("viewport") if isinstance(design.get("viewport"), dict) else {}
+    scroll = design.get("scroll") if isinstance(design.get("scroll"), dict) else {}
+    width = _num((viewport or {}).get("width"), _num(design.get("width")))
+    height = _num((viewport or {}).get("height"), _num(design.get("height"))) if scroll.get("required") else _num(design.get("height"))
+    return {"x": 0, "y": 0, "width": width, "height": height}
+
+
+def _inject_internal_scroll_nodes(packet: dict[str, Any], nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    design = packet.get("design") or {}
+    scroll = design.get("scroll") if isinstance(design.get("scroll"), dict) else {}
+    viewport = design.get("viewport") if isinstance(design.get("viewport"), dict) else {}
+    if not scroll.get("required") or not nodes:
+        return nodes
+
+    root_rect = _prefab_root_rect(design)
+    design_width = _num(design.get("width"))
+    design_height = _num(design.get("height"))
+    viewport_height = _num(root_rect.get("height"))
+    if design_height <= viewport_height or viewport_height <= 0:
+        return nodes
+
+    root_ids = {str(root.get("id") or "root") for root in packet.get("nodes") or []}
+    top_level_nodes = [node for node in nodes if str(node.get("parent_id") or "root") in root_ids]
+    scroll_y = _infer_internal_scroll_start(top_level_nodes, design_width, viewport_height)
+    if scroll_y >= viewport_height - 1:
+        scroll_y = 0
+    scroll_viewport_height = round(max(0, viewport_height - scroll_y), 2)
+    scroll_content_height = round(max(scroll_viewport_height, design_height - scroll_y), 2)
+    if scroll_content_height <= scroll_viewport_height + 1:
+        return nodes
+
+    scroll_top_ids = {
+        str(node.get("id"))
+        for node in top_level_nodes
+        if _rect_bottom(node.get("global_rect")) > viewport_height + 1 or _num((node.get("global_rect") or {}).get("y")) >= scroll_y - 1
+    }
+    if not scroll_top_ids:
+        return nodes
+
+    packet_id = str(packet.get("packet_id") or "packet")
+    scroll_id = f"{packet_id}_internal_scroll"
+    viewport_id = f"{packet_id}_internal_scroll_viewport"
+    content_id = f"{packet_id}_internal_scroll_content"
+    scroll_rect = {"x": 0, "y": round(scroll_y, 2), "width": _num(viewport.get("width"), design_width), "height": scroll_viewport_height}
+    content_rect = {"x": 0, "y": 0, "width": scroll_rect["width"], "height": scroll_content_height}
+    scroll_node = _synthetic_scroll_node(
+        node_id=scroll_id,
+        parent_id="root",
+        name="InferredScrollArea",
+        semantic_type="scroll_area_candidate",
+        local_rect=scroll_rect,
+        global_rect=scroll_rect,
+        z_index=-3,
+        unity_scroll_hint={
+            "can_add_scroll_rect": True,
+            "default_add_scroll_rect": True,
+            "direction": scroll.get("direction") or "vertical",
+            "viewport_node_id": viewport_id,
+            "content_node_id": content_id,
+            "viewport_rect": scroll_rect,
+            "content_rect": content_rect,
+            "movement_type": "clamped",
+            "requires_review": False,
+            "source": scroll.get("source") or "design_scroll",
+            "preferred_unity_scope": scroll.get("preferred_unity_scope") or "prefab_internal_scroll_area",
+            "notes": [
+                "This ScrollRect was inserted inside the generated prefab from design.scroll metadata.",
+                "Top-level nodes below the inferred fixed header were reparented into Content.",
+            ],
+        },
+    )
+    viewport_node = _synthetic_scroll_node(
+        node_id=viewport_id,
+        parent_id=scroll_id,
+        name="Viewport",
+        semantic_type="scroll_viewport_candidate",
+        local_rect={"x": 0, "y": 0, "width": scroll_rect["width"], "height": scroll_viewport_height},
+        global_rect=scroll_rect,
+        z_index=-2,
+    )
+    content_node = _synthetic_scroll_node(
+        node_id=content_id,
+        parent_id=viewport_id,
+        name="Content",
+        semantic_type="scroll_content_candidate",
+        local_rect=content_rect,
+        global_rect={"x": 0, "y": round(scroll_y, 2), "width": scroll_rect["width"], "height": scroll_content_height},
+        z_index=-1,
+    )
+
+    output: list[dict[str, Any]] = []
+    inserted = False
+    for node in nodes:
+        node_id = str(node.get("id"))
+        is_scroll_top = node_id in scroll_top_ids
+        if is_scroll_top and not inserted:
+            output.extend([scroll_node, viewport_node, content_node])
+            inserted = True
+        current = dict(node)
+        if is_scroll_top:
+            current["parent_id"] = content_id
+            rect = dict(current.get("global_rect") or current.get("local_rect") or {})
+            local_rect = {
+                "x": round(_num(rect.get("x")), 2),
+                "y": round(_num(rect.get("y")) - scroll_y, 2),
+                "width": _num(rect.get("width")),
+                "height": _num(rect.get("height")),
+            }
+            current["local_rect"] = local_rect
+            current["unity_rect_hint"] = _unity_rect_hint(local_rect)
+            current["source_metadata"] = dict(current.get("source_metadata") or {})
+            current["source_metadata"]["internal_scroll_parent_id"] = content_id
+        output.append(current)
+    if not inserted:
+        output.extend([scroll_node, viewport_node, content_node])
+    return output
+
+
+def _infer_internal_scroll_start(top_level_nodes: list[dict[str, Any]], design_width: float, viewport_height: float) -> float:
+    fixed_bottom = 0.0
+    for node in top_level_nodes:
+        rect = node.get("global_rect") or {}
+        y = _num(rect.get("y"))
+        width = _num(rect.get("width"))
+        bottom = _rect_bottom(rect)
+        if y <= 2 and bottom < viewport_height - 8 and width >= design_width * 0.6:
+            fixed_bottom = max(fixed_bottom, bottom)
+    if fixed_bottom <= 0:
+        return 0.0
+    candidates = [
+        _num((node.get("global_rect") or {}).get("y"))
+        for node in top_level_nodes
+        if _num((node.get("global_rect") or {}).get("y")) >= fixed_bottom - 2
+    ]
+    return round(min(candidates), 2) if candidates else round(fixed_bottom, 2)
+
+
+def _synthetic_scroll_node(
+    node_id: str,
+    parent_id: str,
+    name: str,
+    semantic_type: str,
+    local_rect: dict[str, float],
+    global_rect: dict[str, float],
+    z_index: int,
+    unity_scroll_hint: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    node = {
+        "id": node_id,
+        "parent_id": parent_id,
+        "name": name,
+        "unity_name_hint": name,
+        "path": f"DesignToUnity/{name}",
+        "type": "group",
+        "semantic_type": semantic_type,
+        "semantic_confidence": 1.0,
+        "semantic_reasons": ["inserted from design scroll metadata"],
+        "visible": True,
+        "z_index": z_index,
+        "global_rect": global_rect,
+        "local_rect": local_rect,
+        "visual_bounds": global_rect,
+        "render_rect": local_rect,
+        "unity_rect_hint": _unity_rect_hint(local_rect),
+        "unity_render_rect_hint": _unity_rect_hint(local_rect),
+        "style": {"opacity": 1},
+        "source_metadata": {"synthetic": True, "source": "design_scroll"},
+    }
+    if unity_scroll_hint:
+        node["unity_scroll_hint"] = unity_scroll_hint
+    return node
+
+
+def _unity_rect_hint(rect: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "anchorMin": [0, 1],
+        "anchorMax": [0, 1],
+        "pivot": [0, 1],
+        "anchoredPosition": [_num(rect.get("x")), -_num(rect.get("y"))],
+        "sizeDelta": [_num(rect.get("width")), _num(rect.get("height"))],
+    }
+
+
+def _rect_bottom(rect: Any) -> float:
+    rect = rect if isinstance(rect, dict) else {}
+    return round(_num(rect.get("y")) + _num(rect.get("height")), 2)
 
 
 def _is_ignored_node(node: dict[str, Any]) -> bool:
@@ -2865,6 +3056,23 @@ def _drop_none(value: Any) -> Any:
 
 def _yaml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=True)
+
+
+def _packet_folder_name(packet: dict[str, Any]) -> str:
+    design = packet.get("design") if isinstance(packet.get("design"), dict) else {}
+    source = packet.get("source") if isinstance(packet.get("source"), dict) else {}
+    candidates = [
+        design.get("name"),
+        source.get("design_name"),
+        source.get("target_name"),
+        source.get("design_id"),
+        packet.get("packet_id"),
+    ]
+    for candidate in candidates:
+        name = _safe_name(str(candidate or ""))
+        if name and name != "DesignToUnityPrefab":
+            return name
+    return _safe_name(str(packet.get("packet_id") or "DesignToUnityPrefab"))
 
 
 def _safe_name(value: str) -> str:

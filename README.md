@@ -1,5 +1,7 @@
 # Design to Unity
 
+<!-- mcp-name: io.github.crackerrrrrr/design-to-unity -->
+
 [中文介绍](README.zh-CN.md)
 
 [GitHub Repository](https://github.com/Crackerrrrrr/design-to-unity) · `Crackerrrrrr/design-to-unity`

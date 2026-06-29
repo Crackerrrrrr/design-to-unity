@@ -1,0 +1,94 @@
+# Design to Unity
+
+> MCP server that turns Lanhu, Figma, PSD / PSB, and Photoshop UI designs into Unity-ready design handoff packets, assets, source maps, and UGUI prefab outputs.
+
+Design to Unity is built for AI-assisted game UI implementation. It exposes design structure, geometry, text, assets, component hints, visual-risk metadata, reusable prefab candidates, and Unity import plans through MCP tools so AI agents and Unity tooling can reconstruct UI with less ambiguity.
+
+Repository: https://github.com/Crackerrrrrr/design-to-unity
+Package name: design-to-unity
+MCP server name: io.github.crackerrrrrr/design-to-unity
+
+## Primary Documentation
+
+- [English README](README.md): Product overview, install instructions, tool lists, Unity importer usage, TMP font mapping, and source coverage.
+- [Chinese README](README.zh-CN.md): Chinese product overview and workflow documentation.
+- [Changelog](CHANGELOG.md): Current release notes.
+- [MCP Registry metadata](server.json): Registry-facing installation and package metadata.
+- [Publishing guide](docs/publishing.md): PyPI, MCP Registry, and repository release checklist.
+- [Launch kit](docs/launch-kit.md): GitHub Release text, launch posts, and demo script.
+
+## Core Capabilities
+
+- Convert Lanhu pages into normalized packets, slices, summaries, Unity plans, and prefab YAML.
+- Convert Figma REST files, local snapshots, plugin exports, pages, frames, and components into the same packet model.
+- Convert PSD / PSB files and Photoshop UXP export folders into packets and Unity outputs.
+- Generate Unity source maps beside prefab YAML for traceability and editor importer input.
+- Install Unity Editor importer / validator scripts into a Unity project.
+- Report readiness issues such as missing TMP font mappings, complex visual effects, masks, blur, blend modes, layout risk, and export fallbacks.
+- Compare Unity screenshots against design references with visual diff helpers.
+
+## Important MCP Tools
+
+Lanhu:
+
+- `lanhu_design_list`
+- `lanhu_design_prepare_packet`
+- `lanhu_design_get_packet`
+- `lanhu_design_get_summary`
+- `lanhu_design_get_node_tree`
+- `lanhu_design_get_asset_manifest`
+- `lanhu_design_get_slices`
+- `lanhu_design_get_unity_plan`
+- `lanhu_design_write_unity_prefab_yaml`
+- `lanhu_design_verify_unity_prefab_yaml`
+
+Figma:
+
+- `figma_design_list_pages`
+- `figma_design_list_frames`
+- `figma_design_list_components`
+- `figma_design_prepare_packet`
+- `figma_design_prepare_batch_packets`
+- `figma_design_prepare_export_packet`
+- `figma_design_prepare_snapshot_packet`
+- `figma_design_get_unity_readiness_report`
+- `figma_design_write_unity_prefab_yaml`
+- `figma_design_write_batch_unity_prefab_yaml`
+- `figma_design_convert_to_unity_prefab`
+- `figma_design_convert_export_to_unity_prefab`
+- `figma_design_install_unity_editor_importer`
+
+PSD / Photoshop:
+
+- `psd_design_prepare_packet`
+- `psd_design_prepare_export_packet`
+- `psd_design_validate_export`
+- `psd_design_get_unity_readiness_report`
+- `psd_design_compare_unity_screenshot`
+- `psd_design_convert_to_unity_prefab`
+- `psd_design_convert_export_to_unity_prefab`
+- `psd_design_install_unity_editor_validator`
+
+Unity:
+
+- `design_to_unity_install_unity_editor_importer`
+
+## Configuration
+
+- `LANHU_COOKIE`: Optional Lanhu cookie for Lanhu project access.
+- `DDS_COOKIE`: Optional DDS cookie; defaults to `LANHU_COOKIE`.
+- `FIGMA_TOKEN`: Optional Figma personal access token.
+- `FIGMA_OAUTH_TOKEN`: Optional Figma OAuth token.
+- `DATA_DIR`: Local packet and asset cache directory, default `./data`.
+- `MCP_TRANSPORT`: Use `stdio` for registry/client package execution or `http` for local HTTP MCP serving.
+- `UNITY_TMP_FONT_ASSET_GUID`: Optional default TMP font asset GUID.
+- `UNITY_TMP_FONT_ASSET_MAP_JSON`: Optional JSON font-family to TMP GUID map.
+- `UNITY_TMP_FONT_ASSET_MAP_PATH`: Optional path to a font map JSON file.
+
+## Agent Guidance
+
+- Prefer packet and source-map fields over guessing from rendered images.
+- Use readiness reports before writing Unity prefabs when fidelity matters.
+- Use the Unity Editor importer for production prefab creation; use static YAML for quick inspection and AI follow-up.
+- Keep business scripts, animation binding, runtime data binding, and project-specific behavior in Unity.
+- Treat generated prefab YAML as a structured snapshot, not as a replacement for project-specific UI engineering.

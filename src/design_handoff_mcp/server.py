@@ -31,7 +31,7 @@ from .figma_adapter import (
 )
 from .figma_client import FigmaClient, parse_figma_url
 from .lanhu_client import LanhuClient
-from .normalizer import attach_reusable_prefab_registry, make_packet
+from .normalizer import apply_lanhu_reused_background_assets, attach_reusable_prefab_registry, make_packet
 from .packet_store import PacketStore, collect_nodes, trim_node_tree
 from .photoshop_export_adapter import make_photoshop_export_packet, photoshop_export_schema, validate_photoshop_export
 from .psd_adapter import make_psd_packet
@@ -224,7 +224,7 @@ def _all_nodes(packet: dict[str, Any]) -> list[dict[str, Any]]:
 def _unity_creation_order(packet: dict[str, Any]) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
     provider = ((packet.get("source") or {}).get("provider") or "lanhu").lower()
-    reverse_siblings = provider != "psd"
+    reverse_siblings = provider == "figma"
 
     def walk_children(parent: dict[str, Any], parent_id: str | None) -> None:
         children = []
@@ -233,8 +233,9 @@ def _unity_creation_order(packet: dict[str, Any]) -> list[dict[str, Any]]:
             current.setdefault("parent_id", parent_id)
             children.append(current)
 
-        # Lanhu payloads observed so far are front-to-back, while psd-tools
-        # traversal matched Photoshop composite when kept in ascending z order.
+        # Unity UGUI renders later siblings on top. Lanhu and PSD payloads
+        # observed so far are bottom-to-top, while Figma normalization uses the
+        # opposite sibling direction.
         children.sort(key=lambda item: item.get("z_index") or 0, reverse=reverse_siblings)
         for child in children:
             if _is_ignored_node(child):
@@ -646,11 +647,12 @@ def _summary_for_packet(packet: dict[str, Any], max_items: int) -> dict[str, Any
     assets = packet.get("assets") or []
     max_items = max(3, min(int(max_items), 50))
     provider = ((packet.get("source") or {}).get("provider") or "lanhu").lower()
-    sibling_order_rule = (
-        "PSD siblings should be created by ascending z_index for Unity UGUI; later PSD traversal nodes render on top."
-        if provider == "psd"
-        else "Lanhu siblings should be created by descending z_index for Unity UGUI based on observed payloads."
-    )
+    if provider == "figma":
+        sibling_order_rule = "Figma siblings should be created by descending normalized z_index for Unity UGUI; later Unity siblings render on top."
+    elif provider == "psd":
+        sibling_order_rule = "PSD siblings should be created by ascending z_index for Unity UGUI; later PSD traversal nodes render on top."
+    else:
+        sibling_order_rule = "Lanhu siblings should be created by ascending z_index for Unity UGUI; later DDS nodes render on top."
 
     type_counts = Counter(node.get("type") or "unknown" for node in nodes)
     semantic_counts = Counter(node.get("semantic_type") or "none" for node in nodes)
@@ -677,7 +679,7 @@ def _summary_for_packet(packet: dict[str, Any], max_items: int) -> dict[str, Any
         for node in sorted(
             [node for node in nodes if node.get("parent_id") == "root"],
             key=lambda item: item.get("z_index") or 0,
-            reverse=True,
+            reverse=provider == "figma",
         )
     ]
 
@@ -1210,8 +1212,8 @@ def _unity_plan_response(packet: dict[str, Any], packet_id: str, include_referen
         order_rule = "Create same-parent Figma siblings in descending normalized z_index order. Unity renders later siblings on top, so create_nodes is already parent-before-child with provider-specific ordering."
         verified_with = "Figma snapshot/plugin export normalization tests"
     else:
-        order_rule = "Create siblings in descending z_index order. In observed Lanhu payloads, larger z_index nodes are behind smaller z_index nodes."
-        verified_with = "-h-海报分享"
+        order_rule = "Create same-parent Lanhu siblings in ascending z_index order. Unity renders later siblings on top, matching observed DDS payloads where full-screen background nodes appear before foreground panels."
+        verified_with = "Lanhu DDS restoration tests and 新手七天签到 visual layer audit"
 
     return {
         "status": "success",
@@ -2546,6 +2548,7 @@ async def lanhu_design_prepare_packet(
         )
         download_result = await assets.download_packet_assets(packet, client, asset_output_dir)
         packet["asset_download"] = download_result
+        reuse_result = apply_lanhu_reused_background_assets(packet)
         attach_reusable_prefab_registry(packet)
         packet_path = store.save(packet)
 
@@ -2560,6 +2563,7 @@ async def lanhu_design_prepare_packet(
             "node_count": node_count,
             "asset_count": len(packet.get("assets") or []),
             "asset_dir": download_result.get("asset_dir"),
+            "reused_background_asset_count": reuse_result.get("applied_count", 0),
             "warning_count": len(packet.get("warnings") or []),
             "warnings_preview": (packet.get("warnings") or [])[:10],
             "available_profiles": sorted((packet.get("handoff_profiles") or {}).keys()),
