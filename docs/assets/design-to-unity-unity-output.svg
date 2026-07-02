@@ -10,8 +10,8 @@
       <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#0F172A" flood-opacity="0.13"/>
     </filter>
     <style>
-      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17202A; letter-spacing: 0; }
-      .sub { font: 500 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5B6772; letter-spacing: 0; }
+      .title { font: 700 31px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17202A; letter-spacing: 0; }
+      .sub { font: 500 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5B6772; letter-spacing: 0; }
       .card-title { font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17202A; letter-spacing: 0; }
       .card-text { font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #536270; letter-spacing: 0; }
       .label { font: 700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #FFFFFF; letter-spacing: 0; }
@@ -21,7 +21,7 @@
 
   <rect width="1120" height="480" rx="26" fill="url(#bg)"/>
   <text x="56" y="66" class="title">Three ways to land in Unity</text>
-  <text x="56" y="98" class="sub">Use the same packet for AI-guided editing, quick static snapshots, or Editor API based import.</text>
+  <text x="56" y="98" class="sub">Use one packet for AI editing, YAML snapshots, or Editor API import.</text>
 
   <g filter="url(#shadow)">
     <rect x="70" y="154" width="300" height="220" rx="22" fill="#FFFFFF"/>
@@ -29,7 +29,7 @@
     <text x="124" y="206" class="label">MCP</text>
     <text x="104" y="252" class="card-title">Unity MCP handoff</text>
     <text x="104" y="284" class="card-text">AI reads nodes, assets, layout hints,</text>
-    <text x="104" y="306" class="card-text">semantic candidates, and source map.</text>
+    <text x="104" y="306" class="card-text">semantics, and source map.</text>
     <text x="104" y="344" class="small">Best for interactive scene editing.</text>
   </g>
 
@@ -38,8 +38,8 @@
     <rect x="444" y="186" width="92" height="30" rx="15" fill="#2563EB"/>
     <text x="463" y="206" class="label">YAML</text>
     <text x="444" y="252" class="card-title">Prefab snapshot</text>
-    <text x="444" y="284" class="card-text">Writes sprites, meta files, prefab YAML,</text>
-    <text x="444" y="306" class="card-text">and a traceable source map.</text>
+    <text x="444" y="284" class="card-text">Writes sprites, meta files,</text>
+    <text x="444" y="306" class="card-text">prefab YAML, and source map.</text>
     <text x="444" y="344" class="small">Best for fast review and regression.</text>
   </g>
 
@@ -48,8 +48,8 @@
     <rect x="784" y="186" width="112" height="30" rx="15" fill="#7C3AED"/>
     <text x="802" y="206" class="label">Editor</text>
     <text x="784" y="252" class="card-title">Unity importer</text>
-    <text x="784" y="284" class="card-text">Creates UGUI, TMP, buttons, sliders,</text>
-    <text x="784" y="306" class="card-text">ScrollRects, and reusable prefabs.</text>
+    <text x="784" y="284" class="card-text">Creates UGUI, TMP, buttons,</text>
+    <text x="784" y="306" class="card-text">ScrollRects, and prefab reuse.</text>
     <text x="784" y="344" class="small">Best for production-style import.</text>
   </g>
 
@@ -57,5 +57,5 @@
   <circle cx="220" cy="400" r="7" fill="#16A085"/>
   <circle cx="560" cy="400" r="7" fill="#2563EB"/>
   <circle cx="900" cy="400" r="7" fill="#7C3AED"/>
-  <text x="284" y="430" class="small">source-map traceability and readiness reports across all paths</text>
+  <text x="320" y="430" class="small">source maps and readiness reports across all paths</text>
 </svg>

@@ -10,8 +10,8 @@
       <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#1F2937" flood-opacity="0.14"/>
     </filter>
     <style>
-      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17202A; letter-spacing: 0; }
-      .sub { font: 500 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5B6772; letter-spacing: 0; }
+      .title { font: 700 31px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17202A; letter-spacing: 0; }
+      .sub { font: 500 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5B6772; letter-spacing: 0; }
       .card-title { font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17202A; letter-spacing: 0; }
       .card-text { font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #536270; letter-spacing: 0; }
       .pill { font: 700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #FFFFFF; letter-spacing: 0; }
@@ -21,8 +21,8 @@
   </defs>
 
   <rect width="1120" height="500" rx="26" fill="url(#bg)"/>
-  <text x="56" y="66" class="title">One pipeline for multiple design sources</text>
-  <text x="56" y="98" class="sub">Different tools keep their own metadata, but Design to Unity normalizes them into one implementation packet.</text>
+  <text x="56" y="66" class="title">Multi-source input, one Unity pipeline</text>
+  <text x="56" y="98" class="sub">Lanhu, Figma, PSD, and plugin exports normalize into one implementation packet.</text>
 
   <g filter="url(#shadow)">
     <rect x="56" y="142" width="206" height="118" rx="18" fill="#FFFFFF"/>
@@ -37,7 +37,7 @@
     <rect x="82" y="318" width="72" height="30" rx="15" fill="#2563EB"/>
     <text x="101" y="338" class="pill">REST</text>
     <text x="82" y="378" class="card-title">Figma</text>
-    <text x="82" y="403" class="card-text">frames, components, variants</text>
+    <text x="82" y="403" class="card-text">frames, components</text>
   </g>
 
   <g filter="url(#shadow)">
@@ -53,7 +53,7 @@
     <rect x="346" y="318" width="84" height="30" rx="15" fill="#7C3AED"/>
     <text x="364" y="338" class="pill">Export</text>
     <text x="346" y="378" class="card-title">Plugin data</text>
-    <text x="346" y="403" class="card-text">Figma plugin and UXP output</text>
+    <text x="346" y="403" class="card-text">plugin and UXP output</text>
   </g>
 
   <path d="M278 200H592" stroke="#9AA7B3" stroke-width="2"/>
@@ -67,7 +67,7 @@
     <text x="660" y="244" class="center-small">same schema</text>
     <text x="660" y="270" class="center-small">same asset rules</text>
     <text x="660" y="296" class="center-small">same Unity hints</text>
-    <text x="660" y="322" class="center-small">same readiness report</text>
+    <text x="660" y="322" class="center-small">same reports</text>
   </g>
 
   <path d="M852 278H958" stroke="#9AA7B3" stroke-width="2"/>
