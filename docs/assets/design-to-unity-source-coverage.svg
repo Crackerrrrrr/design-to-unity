@@ -1,0 +1,82 @@
+<svg width="1120" height="500" viewBox="0 0 1120 500" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Supported design sources</title>
+  <desc id="desc">Lanhu, Figma, PSD, PSB, and Photoshop UXP exports enter the same Design to Unity pipeline.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1120" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FBFF"/>
+      <stop offset="1" stop-color="#EEF7F3"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#1F2937" flood-opacity="0.14"/>
+    </filter>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17202A; letter-spacing: 0; }
+      .sub { font: 500 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5B6772; letter-spacing: 0; }
+      .card-title { font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17202A; letter-spacing: 0; }
+      .card-text { font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #536270; letter-spacing: 0; }
+      .pill { font: 700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #FFFFFF; letter-spacing: 0; }
+      .center { font: 700 24px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #FFFFFF; letter-spacing: 0; }
+      .center-small { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #DDE9F5; letter-spacing: 0; }
+    </style>
+  </defs>
+
+  <rect width="1120" height="500" rx="26" fill="url(#bg)"/>
+  <text x="56" y="66" class="title">One pipeline for multiple design sources</text>
+  <text x="56" y="98" class="sub">Different tools keep their own metadata, but Design to Unity normalizes them into one implementation packet.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="56" y="142" width="206" height="118" rx="18" fill="#FFFFFF"/>
+    <rect x="82" y="166" width="58" height="30" rx="15" fill="#16A085"/>
+    <text x="99" y="186" class="pill">Live</text>
+    <text x="82" y="226" class="card-title">Lanhu</text>
+    <text x="82" y="251" class="card-text">pages, slices, notes</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="56" y="294" width="206" height="118" rx="18" fill="#FFFFFF"/>
+    <rect x="82" y="318" width="72" height="30" rx="15" fill="#2563EB"/>
+    <text x="101" y="338" class="pill">REST</text>
+    <text x="82" y="378" class="card-title">Figma</text>
+    <text x="82" y="403" class="card-text">frames, components, variants</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="320" y="142" width="206" height="118" rx="18" fill="#FFFFFF"/>
+    <rect x="346" y="166" width="78" height="30" rx="15" fill="#D97706"/>
+    <text x="366" y="186" class="pill">Local</text>
+    <text x="346" y="226" class="card-title">PSD / PSB</text>
+    <text x="346" y="251" class="card-text">layers, bounds, text data</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="320" y="294" width="206" height="118" rx="18" fill="#FFFFFF"/>
+    <rect x="346" y="318" width="84" height="30" rx="15" fill="#7C3AED"/>
+    <text x="364" y="338" class="pill">Export</text>
+    <text x="346" y="378" class="card-title">Plugin data</text>
+    <text x="346" y="403" class="card-text">Figma plugin and UXP output</text>
+  </g>
+
+  <path d="M278 200H592" stroke="#9AA7B3" stroke-width="2"/>
+  <path d="M278 352H592" stroke="#9AA7B3" stroke-width="2"/>
+  <path d="M585 193L599 200L585 207" stroke="#7B8794" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M585 345L599 352L585 359" stroke="#7B8794" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="620" y="158" width="220" height="240" rx="24" fill="#162033"/>
+    <text x="660" y="212" class="center">Unified Packet</text>
+    <text x="660" y="244" class="center-small">same schema</text>
+    <text x="660" y="270" class="center-small">same asset rules</text>
+    <text x="660" y="296" class="center-small">same Unity hints</text>
+    <text x="660" y="322" class="center-small">same readiness report</text>
+  </g>
+
+  <path d="M852 278H958" stroke="#9AA7B3" stroke-width="2"/>
+  <path d="M951 271L965 278L951 285" stroke="#7B8794" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="982" y="202" width="82" height="152" rx="18" fill="#FFFFFF"/>
+    <circle cx="1023" cy="246" r="18" fill="#DCFCE7" stroke="#16A085"/>
+    <circle cx="1023" cy="296" r="18" fill="#DBEAFE" stroke="#2563EB"/>
+    <text x="1003" y="338" class="card-text">Unity</text>
+  </g>
+</svg>

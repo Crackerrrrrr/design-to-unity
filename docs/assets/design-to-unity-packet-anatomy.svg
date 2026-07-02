@@ -1,0 +1,80 @@
+<svg width="1120" height="520" viewBox="0 0 1120 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Design Implementation Packet anatomy</title>
+  <desc id="desc">The packet contains node hierarchy, geometry, assets, text, render strategy, source semantics, reuse, and reports.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1120" y2="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#101827"/>
+      <stop offset="1" stop-color="#152235"/>
+    </linearGradient>
+    <linearGradient id="core" x1="390" y1="120" x2="730" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0EA5E9"/>
+      <stop offset="1" stop-color="#16A34A"/>
+    </linearGradient>
+    <filter id="shadow" x="-12%" y="-12%" width="124%" height="134%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #F8FAFC; letter-spacing: 0; }
+      .sub { font: 500 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #CBD5E1; letter-spacing: 0; }
+      .core-title { font: 700 26px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #FFFFFF; letter-spacing: 0; }
+      .core-text { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #E8F5FF; letter-spacing: 0; }
+      .card-title { font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #F8FAFC; letter-spacing: 0; }
+      .card-text { font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #B8C6D4; letter-spacing: 0; }
+      .line { stroke: #64748B; stroke-width: 2; stroke-linecap: round; }
+    </style>
+  </defs>
+
+  <rect width="1120" height="520" rx="26" fill="url(#bg)"/>
+  <text x="56" y="68" class="title">What the packet gives to AI and Unity</text>
+  <text x="56" y="100" class="sub">The goal is not a flat screenshot. The packet carries the evidence needed to rebuild and inspect a UI.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="404" y="160" width="312" height="214" rx="28" fill="url(#core)"/>
+    <text x="458" y="224" class="core-title">Implementation Packet</text>
+    <text x="458" y="260" class="core-text">normalized design data</text>
+    <text x="458" y="286" class="core-text">low-ambiguity Unity hints</text>
+    <text x="458" y="312" class="core-text">traceable source metadata</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="72" y="148" width="232" height="82" rx="16" fill="#1E293B"/>
+    <text x="100" y="183" class="card-title">Node hierarchy</text>
+    <text x="100" y="207" class="card-text">groups, z-order, parent links</text>
+  </g>
+  <line x1="304" y1="189" x2="404" y2="220" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="72" y="258" width="232" height="82" rx="16" fill="#1E293B"/>
+    <text x="100" y="293" class="card-title">Geometry</text>
+    <text x="100" y="317" class="card-text">rects, anchors, visual bounds</text>
+  </g>
+  <line x1="304" y1="299" x2="404" y2="280" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="72" y="368" width="232" height="82" rx="16" fill="#1E293B"/>
+    <text x="100" y="403" class="card-title">Assets</text>
+    <text x="100" y="427" class="card-text">slices, hashes, dedupe hints</text>
+  </g>
+  <line x1="304" y1="409" x2="420" y2="330" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="816" y="148" width="232" height="82" rx="16" fill="#1E293B"/>
+    <text x="844" y="183" class="card-title">Text metadata</text>
+    <text x="844" y="207" class="card-text">TMP, fonts, style warnings</text>
+  </g>
+  <line x1="816" y1="189" x2="716" y2="220" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="816" y="258" width="232" height="82" rx="16" fill="#1E293B"/>
+    <text x="844" y="293" class="card-title">Source semantics</text>
+    <text x="844" y="317" class="card-text">button, slider, scroll candidates</text>
+  </g>
+  <line x1="816" y1="299" x2="716" y2="280" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="816" y="368" width="232" height="82" rx="16" fill="#1E293B"/>
+    <text x="844" y="403" class="card-title">Reports</text>
+    <text x="844" y="427" class="card-text">readiness, warnings, source map</text>
+  </g>
+  <line x1="816" y1="409" x2="700" y2="330" class="line"/>
+</svg>

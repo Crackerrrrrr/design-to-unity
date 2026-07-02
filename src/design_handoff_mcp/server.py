@@ -121,7 +121,7 @@ def _font_requirements_report(packet: dict[str, Any], settings: Settings, max_it
     nodes = _all_nodes(packet)
     groups: dict[str, dict[str, Any]] = {}
     missing_nodes = []
-    fallback_nodes = []
+    configured_default_nodes = []
 
     for node in nodes:
         text = node.get("text") if isinstance(node.get("text"), dict) else {}
@@ -169,25 +169,25 @@ def _font_requirements_report(packet: dict[str, Any], settings: Settings, max_it
             entry["mapping_key"] = mapped_key
             entry["tmp_font_asset_guid"] = mapped_guid
         elif default_guid:
-            entry["mapping_status"] = "fallback_default"
+            entry["mapping_status"] = "configured_default"
             entry["tmp_font_asset_guid"] = default_guid
-            fallback_nodes.append(_node_digest(node))
+            configured_default_nodes.append(_node_digest(node))
         else:
             missing_nodes.append(_node_digest(node))
 
     fonts = sorted(groups.values(), key=lambda item: (str(item.get("font_family") or ""), str(item.get("font_style") or ""), str(item.get("font_weight") or "")))
     missing_fonts = [item for item in fonts if item.get("mapping_status") == "missing"]
-    fallback_fonts = [item for item in fonts if item.get("mapping_status") == "fallback_default"]
+    configured_default_fonts = [item for item in fonts if item.get("mapping_status") == "configured_default"]
     return {
         "text_node_with_font_count": sum(item["node_count"] for item in fonts),
         "unique_font_count": len(fonts),
         "configured_font_map_count": len(font_map),
         "default_tmp_font_asset_guid_configured": bool(default_guid),
         "missing_font_mapping_count": len(missing_fonts),
-        "fallback_default_font_count": len(fallback_fonts),
+        "configured_default_font_count": len(configured_default_fonts),
         "fonts": fonts[:max_items],
         "missing_font_mapping_nodes": missing_nodes[:max_items],
-        "fallback_default_font_nodes": fallback_nodes[:max_items],
+        "configured_default_font_nodes": configured_default_nodes[:max_items],
         "config_warnings": config_warnings,
     }
 
@@ -883,8 +883,10 @@ def _unity_readiness_report(
         review_items.append(
             {
                 "code": "missing_tmp_font_mapping",
+                "severity": "high",
                 "count": font_requirements["missing_font_mapping_count"],
-                "message": "Some text fonts do not have a configured TMP Font Asset mapping. Set UNITY_TMP_FONT_ASSET_MAP_JSON/PATH or pass tmp_font_asset_map_json.",
+                "user_visible": True,
+                "message": "Editable TMP text is the default output, but some source fonts do not have a configured TMP Font Asset mapping. Text will stay editable; provide UNITY_TMP_FONT_ASSET_MAP_JSON/PATH or pass tmp_font_asset_map_json before final visual QA.",
             }
         )
     if font_requirements["config_warnings"]:
@@ -918,7 +920,7 @@ def _unity_readiness_report(
         "image": sum(1 for node in nodes if node.get("asset_ref")),
         "textmeshpro": len(text_nodes),
         "missing_tmp_font_mapping": font_requirements["missing_font_mapping_count"],
-        "fallback_default_tmp_font": font_requirements["fallback_default_font_count"],
+        "configured_default_tmp_font": font_requirements["configured_default_font_count"],
         "button": semantic_counts.get("button_candidate", 0),
         "slider": semantic_counts.get("slider_candidate", 0) + semantic_counts.get("progress_candidate", 0),
         "toggle": semantic_counts.get("toggle_candidate", 0),
@@ -990,6 +992,8 @@ def _unity_readiness_report(
             next_actions.append("For blurred, blended, masked, gradient, or multi-fill Figma areas, prefer rendered assets or plugin export before final visual QA.")
         else:
             next_actions.append("For masked, clipped, blended, smart-object, or adjustment-heavy PSD areas, prefer group rasterization or Photoshop UXP export before final visual QA.")
+    if font_requirements["missing_font_mapping_count"]:
+        next_actions.append("Provide TMP Font Asset mappings for missing source fonts; do not switch to text slices unless the user explicitly chooses visual-only text output.")
     if text_nodes:
         next_actions.append("Import or assign the project TMP Font Asset before final visual QA.")
     if component_candidates["slider"] or component_candidates["scroll_rect"] or component_candidates["scrollbar"] or component_candidates["mask"] or component_candidates["layout_group"] or component_candidates["layout_element"] or component_candidates["toggle"] or component_candidates["tab"] or component_candidates["radio"] or component_candidates["input_field"] or component_candidates["dropdown"]:
@@ -1020,12 +1024,23 @@ def _unity_readiness_report(
             "ignored_node_count": len(ignored_nodes),
             "unique_text_font_count": font_requirements["unique_font_count"],
             "missing_tmp_font_mapping_count": font_requirements["missing_font_mapping_count"],
-            "fallback_default_tmp_font_count": font_requirements["fallback_default_font_count"],
+            "configured_default_tmp_font_count": font_requirements["configured_default_font_count"],
             "configured_tmp_font_map_count": font_requirements["configured_font_map_count"],
             "warning_counts": dict(warning_counts),
             "severity_counts": dict(severity_counts),
             "component_candidates": component_candidates,
             "prefab_stats": prefab_stats,
+        },
+        "text_restoration_policy": {
+            "mode": "editable_first",
+            "default_use_text_components": True,
+            "text_component": "TextMeshProUGUI",
+            "auto_rasterize_on_missing_tmp_font": False,
+            "missing_tmp_font_feedback": "review_items.missing_tmp_font_mapping",
+            "missing_tmp_font_mapping_count": font_requirements["missing_font_mapping_count"],
+            "configured_default_tmp_font_count": font_requirements["configured_default_font_count"],
+            "configured_tmp_font_map_count": font_requirements["configured_font_map_count"],
+            "requires_user_font_mapping": bool(font_requirements["missing_font_mapping_count"]),
         },
         "blockers": blockers,
         "review_items": review_items,

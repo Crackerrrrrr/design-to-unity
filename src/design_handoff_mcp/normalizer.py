@@ -54,6 +54,7 @@ def make_packet(
 ) -> dict[str, Any]:
     source_payload = dds_schema or sketch_json or {}
     design_info = _design_info(design, source_payload)
+    design_info["provider"] = "lanhu"
     asset_registry: dict[str, dict[str, Any]] = {}
     warnings: list[dict[str, Any]] = []
     if design_info.get("source_image_url"):
@@ -99,6 +100,8 @@ def make_packet(
         if node:
             root_node["children"].append(node)
 
+    _merge_overlapping_lanhu_text_fragments(root_node, design_info)
+    _attach_text_backed_button_hints(root_node, design_info)
     _apply_lanhu_scroll_viewport_hint(root_node, design_info, warnings)
     _enrich_assets(asset_registry, root_node, design_info)
     enrich_delivery_metadata(root_node, design_info, asset_registry, provider="lanhu")
@@ -698,6 +701,16 @@ def _register_asset(
 def _apply_semantics(node: dict[str, Any], design_info: dict[str, Any]) -> None:
     name = str(node.get("name") or "").lower()
     text = str((node.get("text") or {}).get("content") or "").lower()
+    identity_text = " ".join(
+        str(part or "")
+        for part in (
+            node.get("id"),
+            node.get("path"),
+            node.get("unity_name_hint"),
+            name,
+            text,
+        )
+    ).lower()
     rect = node.get("global_rect") or {}
     width = _num(rect.get("width")) or 0
     height = _num(rect.get("height")) or 0
@@ -711,6 +724,7 @@ def _apply_semantics(node: dict[str, Any], design_info: dict[str, Any]) -> None:
     node_type = node.get("type")
     candidates: list[dict[str, Any]] = []
 
+    is_lanhu_design = design_info.get("provider") == "lanhu"
     component_canvas = screen_w <= 512 and screen_h <= 256
     strong_button_tokens = ("btn", "button", "按钮")
     action_button_tokens = (
@@ -721,6 +735,10 @@ def _apply_semantics(node: dict[str, Any], design_info: dict[str, Any]) -> None:
         "play",
         "start",
         "close",
+        "open",
+        "buy",
+        "claim",
+        "purchase",
         "开始",
         "确定",
         "确认",
@@ -728,21 +746,32 @@ def _apply_semantics(node: dict[str, Any], design_info: dict[str, Any]) -> None:
         "关闭",
         "继续",
         "领取",
+        "购买",
     )
-    button_like_rect = (
+    physical_button_like_rect = (
         2.0 <= aspect <= 8.0
         and 28 <= height <= 120
         and width >= 80
         and (area_ratio <= 0.2 or component_canvas)
     )
-    action_button = node_type in {"image", "shape", "group"} and button_like_rect and _has_token(name, action_button_tokens)
-    if _has_token(name, strong_button_tokens) or action_button:
+    logical_button_like_rect = (
+        is_lanhu_design
+        and
+        screen_w <= 512
+        and 1.6 <= aspect <= 8.0
+        and 8 <= height <= 42
+        and width >= 20
+        and area_ratio <= 0.08
+    )
+    button_like_rect = physical_button_like_rect or logical_button_like_rect
+    action_button = node_type in {"image", "shape", "group"} and button_like_rect and _has_token(identity_text, action_button_tokens)
+    if _has_token(identity_text, strong_button_tokens) or action_button:
         reasons = []
-        if _has_token(name, strong_button_tokens):
+        if _has_token(identity_text, strong_button_tokens):
             reasons.append("name/action text suggests button")
         if button_like_rect:
             reasons.append("rect has button-like aspect and height")
-        confidence = 0.88 if action_button and component_canvas else 0.86 if _has_token(name, strong_button_tokens) else 0.62
+        confidence = 0.88 if action_button and (component_canvas or logical_button_like_rect) else 0.86 if _has_token(identity_text, strong_button_tokens) else 0.62
         _add_semantic(candidates, "button_candidate", confidence, reasons)
 
     scrollbar_tokens = ("scrollbar", "scroll_bar", "scroll bar", "滚动条")
@@ -1125,6 +1154,283 @@ def _apply_semantics(node: dict[str, Any], design_info: dict[str, Any]) -> None:
 
 def _has_token(text: str, tokens: tuple[str, ...]) -> bool:
     return any(token in text for token in tokens)
+
+
+def _merge_overlapping_lanhu_text_fragments(root: dict[str, Any], design_info: dict[str, Any]) -> None:
+    def visit(parent: dict[str, Any]) -> None:
+        for child in parent.get("children") or []:
+            if isinstance(child, dict):
+                visit(child)
+
+        children = parent.get("children") or []
+        groups: dict[tuple[float, float, float, float], list[dict[str, Any]]] = {}
+        for child in children:
+            if not isinstance(child, dict) or child.get("type") != "text" or not _text_content(child):
+                continue
+            rect = child.get("global_rect") or {}
+            key = (
+                round(_num(rect.get("x")) or 0, 1),
+                round(_num(rect.get("y")) or 0, 1),
+                round(_num(rect.get("width")) or 0, 1),
+                round(_num(rect.get("height")) or 0, 1),
+            )
+            groups.setdefault(key, []).append(child)
+
+        merge_by_id: dict[str, dict[str, Any]] = {}
+        merged_ids: set[str] = set()
+        for key, items in groups.items():
+            if len(items) < 2:
+                continue
+            merged = _merged_lanhu_rich_text_node(parent, items, design_info)
+            if not merged:
+                continue
+            first_id = str(items[0].get("id") or "")
+            if first_id:
+                merge_by_id[first_id] = merged
+            merged_ids.update(str(item.get("id") or "") for item in items)
+
+        if not merge_by_id:
+            return
+        new_children: list[dict[str, Any]] = []
+        for child in children:
+            child_id = str(child.get("id") or "")
+            if child_id in merge_by_id:
+                new_children.append(merge_by_id[child_id])
+            elif child_id not in merged_ids:
+                new_children.append(child)
+        parent["children"] = new_children
+
+    visit(root)
+
+
+def _merged_lanhu_rich_text_node(parent: dict[str, Any], items: list[dict[str, Any]], design_info: dict[str, Any]) -> dict[str, Any] | None:
+    ordered = sorted(items, key=lambda node: int(_num(node.get("z_index"), 0) or 0))
+    first = ordered[0]
+    parent_id = str(parent.get("id") or "root")
+    rect = dict(first.get("global_rect") or {})
+    local_rect = dict(first.get("local_rect") or {})
+    content, spans = _join_lanhu_text_fragments(ordered)
+    if not content.strip():
+        return None
+
+    text = dict(first.get("text") or {})
+    text["content"] = content
+    text["spans"] = spans
+    text["wrap"] = bool("\n" in content or any((node.get("text") or {}).get("wrap") for node in ordered))
+    text["rich_text_source"] = "lanhu_overlapping_fragments"
+
+    merged_id = f"{parent_id}_rich_text_{_hash([node.get('id') for node in ordered])[:8]}"
+    merged = {
+        **first,
+        "id": merged_id,
+        "parent_id": parent_id,
+        "name": str(parent.get("name") or first.get("name") or "rich_text"),
+        "unity_name_hint": _unity_name(int(_num(first.get("z_index"), 0) or 0), f"{parent.get('name') or 'rich_text'}_rich_text"),
+        "path": f"{parent.get('path') or parent.get('name') or parent_id}/rich_text",
+        "type": "text",
+        "semantic_type": None,
+        "semantic_confidence": None,
+        "semantic_reasons": [],
+        "global_rect": rect,
+        "local_rect": local_rect,
+        "unity_rect_hint": _unity_rect(local_rect),
+        "style": dict(first.get("style") or {}),
+        "text": text,
+        "asset_ref": None,
+        "children": [],
+        "source_metadata": {
+            **(first.get("source_metadata") or {}),
+            "merged_text_fragments": [node.get("id") for node in ordered],
+            "source": "lanhu_overlapping_fragments",
+        },
+    }
+    merged["content_hash"] = _hash(
+        {
+            "rect": rect,
+            "style": merged["style"],
+            "text": text,
+            "asset_ref": None,
+        }
+    )
+    _apply_semantics(merged, design_info)
+    merged["source_metadata"]["merged_text_fragments"] = [node.get("id") for node in ordered]
+    merged["source_metadata"]["source"] = "lanhu_overlapping_fragments"
+    return merged
+
+
+def _join_lanhu_text_fragments(items: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    content = ""
+    spans: list[dict[str, Any]] = []
+    for node in items:
+        text = node.get("text") if isinstance(node.get("text"), dict) else {}
+        fragment = str(text.get("content") or "")
+        if not fragment:
+            continue
+        separator = _lanhu_text_fragment_separator(content, fragment)
+        content += separator
+        start = len(content)
+        content += fragment
+        span = {
+            "start": start,
+            "length": len(fragment),
+            "color": text.get("color"),
+            "font_size": text.get("font_size"),
+            "font_weight": text.get("font_weight"),
+            "font_style": text.get("font_style"),
+        }
+        spans.append({key: value for key, value in span.items() if value is not None})
+    return content, spans
+
+
+def _lanhu_text_fragment_separator(current: str, fragment: str) -> str:
+    if not current or not fragment:
+        return ""
+    if current[-1].isspace() or fragment[0].isspace():
+        return ""
+    if fragment[0] in ",.;:!?，。；：！？)]}":
+        return ""
+    if current[-1] in "([{":
+        return ""
+    if current[-1] in ",，;；:":
+        return " "
+    if current[-1].isalnum() and fragment[0].isalnum():
+        return " "
+    return ""
+
+
+def _text_content(node: dict[str, Any]) -> str:
+    text = node.get("text") if isinstance(node.get("text"), dict) else {}
+    return str(text.get("content") or "")
+
+
+def _attach_text_backed_button_hints(root: dict[str, Any], design_info: dict[str, Any]) -> None:
+    nodes: list[dict[str, Any]] = []
+    parent_by_obj: dict[int, dict[str, Any]] = {}
+
+    def walk(node: dict[str, Any], parent: dict[str, Any] | None = None) -> None:
+        nodes.append(node)
+        if parent is not None:
+            parent_by_obj[id(node)] = parent
+        for child in node.get("children") or []:
+            if isinstance(child, dict):
+                walk(child, node)
+
+    walk(root)
+    for text_node in nodes:
+        if text_node.get("type") != "text" or not _button_action_label(text_node):
+            continue
+        candidate = parent_by_obj.get(id(text_node))
+        depth = 0
+        while candidate is not None and depth < 6:
+            if _is_text_button_backing(candidate, text_node, design_info):
+                _promote_semantic(
+                    candidate,
+                    "button_candidate",
+                    0.9,
+                    ["action text is placed inside a button-like backing node"],
+                )
+                candidate["unity_button_hint"] = {
+                    "can_add_button": True,
+                    "default_add_button": True,
+                    "target_graphic_node_id": candidate.get("id"),
+                    "label_node_id": text_node.get("id"),
+                    "raycast_target_if_interactive": True,
+                    "source": "text_backed_button_inference",
+                }
+                break
+            candidate = parent_by_obj.get(id(candidate))
+            depth += 1
+
+
+def _button_action_label(node: dict[str, Any]) -> str | None:
+    text = node.get("text") if isinstance(node.get("text"), dict) else {}
+    content = str(text.get("content") or "").strip()
+    if not content:
+        return None
+    lowered = content.lower()
+    action_tokens = (
+        "open",
+        "buy",
+        "claim",
+        "free",
+        "unlock",
+        "get now",
+        "领取",
+        "购买",
+        "打开",
+        "免费",
+        "解锁",
+    )
+    return content if _has_token(lowered, action_tokens) else None
+
+
+def _is_text_button_backing(candidate: dict[str, Any], text_node: dict[str, Any], design_info: dict[str, Any]) -> bool:
+    if candidate.get("type") not in {"image", "shape", "group"}:
+        return False
+    if not (candidate.get("asset_ref") or candidate.get("type") == "shape"):
+        return False
+    if candidate.get("semantic_type") in {
+        "screen_root",
+        "background_candidate",
+        "panel_candidate",
+        "dialog_candidate",
+        "scroll_area_candidate",
+        "scroll_viewport_candidate",
+        "scroll_content_candidate",
+        "slider_candidate",
+        "progress_candidate",
+    }:
+        return False
+
+    rect = candidate.get("global_rect") or {}
+    text_rect = text_node.get("global_rect") or {}
+    width = _num(rect.get("width")) or 0
+    height = _num(rect.get("height")) or 0
+    aspect = width / height if height else 0
+    screen_w = _num(design_info.get("width")) or 0
+    screen_h = _num(design_info.get("height")) or 0
+    area_ratio = (width * height) / max(screen_w * screen_h, 1) if width and height else 0
+    if screen_w <= 512:
+        button_like_rect = 1.6 <= aspect <= 8.0 and 8 <= height <= 42 and width >= 20 and area_ratio <= 0.08
+    else:
+        button_like_rect = 2.0 <= aspect <= 8.0 and 28 <= height <= 120 and width >= 80 and area_ratio <= 0.2
+    if not button_like_rect:
+        return False
+
+    x = _num(rect.get("x")) or 0
+    y = _num(rect.get("y")) or 0
+    tx = _num(text_rect.get("x")) or 0
+    ty = _num(text_rect.get("y")) or 0
+    tw = _num(text_rect.get("width")) or 0
+    th = _num(text_rect.get("height")) or 0
+    return bool(
+        tx >= x - 2
+        and ty >= y - 2
+        and tx + tw <= x + width + 2
+        and ty + th <= y + height + 2
+        and abs((tx + tw / 2) - (x + width / 2)) <= width * 0.35
+    )
+
+
+def _promote_semantic(node: dict[str, Any], semantic_type: str, confidence: float, reasons: list[str]) -> None:
+    candidates = list(node.get("semantic_candidates") or [])
+    _add_semantic(candidates, semantic_type, confidence, reasons)
+    candidates.sort(key=lambda item: item["confidence"], reverse=True)
+    primary = candidates[0] if candidates else None
+    node["semantic_candidates"] = candidates
+    node["semantic_type"] = primary["semantic_type"] if primary else None
+    node["semantic_confidence"] = primary["confidence"] if primary else None
+    node["semantic_reasons"] = primary["reasons"] if primary else []
+    if primary and primary["confidence"] < 0.7:
+        node["requires_semantic_review"] = True
+    else:
+        node.pop("requires_semantic_review", None)
+    if node.get("semantic_type") == "button_candidate":
+        node["unity_interaction_hint"] = {
+            "can_add_button": True,
+            "default_add_button": True,
+            "raycast_target_if_interactive": True,
+        }
 
 
 def _toggle_value_from_text(text: str) -> bool | None:

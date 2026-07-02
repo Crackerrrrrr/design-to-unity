@@ -26,7 +26,6 @@ GRID_LAYOUT_GROUP_SCRIPT_GUID = "8a8695521f0d02e499659fee002a26c2"
 LAYOUT_ELEMENT_SCRIPT_GUID = "306cc8c2b49d7114eaa3623786fc2126"
 OUTLINE_SCRIPT_GUID = "e19747de3f5aca642ab2be37e372fb86"
 SHADOW_SCRIPT_GUID = "cfabb0440166ab443bba8876756fdfa9"
-DEFAULT_TMP_FONT_ASSET_GUID = "2f7116f10747a67409388e93052ae222"
 TMP_FONT_ASSET_FILE_ID = 11400000
 SPRITE_FILE_ID = 21300000
 
@@ -103,7 +102,8 @@ def write_unity_prefab_yaml(
             warnings.append(
                 {
                     "code": "missing_tmp_font",
-                    "message": "No TMP font asset guid could be resolved. TextMeshProUGUI components will use empty font references.",
+                    "severity": "high",
+                    "message": "Editable TextMeshProUGUI output is enabled, but no TMP Font Asset guid could be resolved. Text components are kept editable with empty font references; pass tmp_font_asset_guid/tmp_font_asset_map or configure UNITY_TMP_FONT_ASSET_GUID/UNITY_TMP_FONT_ASSET_MAP_JSON.",
                 }
             )
         if not _has_tmp_essential_resources(project_root):
@@ -206,6 +206,12 @@ def write_unity_prefab_yaml(
         "tmp_font_asset_guid": tmp_font_guid,
         "tmp_font_material_file_id": tmp_font_material_file_id,
         "tmp_font_asset_map_count": len(tmp_font_map),
+        "text_restoration_policy": _text_restoration_policy(
+            use_text_components=use_text_components,
+            tmp_text_node_count=stats["tmp_text_node_count"],
+            tmp_font_asset_guid=tmp_font_guid,
+            tmp_font_asset_map_count=len(tmp_font_map),
+        ),
         "missing_asset_count": len([w for w in warnings if w.get("code") == "missing_asset"]),
         "warnings": warnings,
         "caveats": [
@@ -441,7 +447,7 @@ def _build_prefab_yaml(
     if add_scroll_components:
         for node in all_nodes:
             node_id = str(node.get("id"))
-            if node.get("semantic_type") == "scroll_area_candidate":
+            if _should_add_scroll_rect_component(node, add_scroll_components):
                 hint = node.get("unity_scroll_hint") or {}
                 scroll_viewport_node_ids.add(str(hint.get("viewport_node_id") or node_id))
             if node.get("semantic_type") == "scroll_viewport_candidate":
@@ -469,7 +475,7 @@ def _build_prefab_yaml(
         )
         has_input_field = bool(add_input_field_components and semantic_type == "input_candidate")
         has_dropdown = bool(add_dropdown_components and semantic_type == "dropdown_candidate")
-        has_scroll_rect = bool(add_scroll_components and semantic_type == "scroll_area_candidate")
+        has_scroll_rect = _should_add_scroll_rect_component(node, add_scroll_components)
         has_scrollbar = _should_add_scrollbar_component(node, add_scroll_components)
         has_rect_mask = bool((add_scroll_components and node_id in scroll_viewport_node_ids) or (add_mask_components and _should_add_mask_component(node)))
         layout_component = _layout_component(node, add_layout_components)
@@ -718,6 +724,7 @@ def _build_prefab_yaml(
         prefab_visual_mode=prefab_visual_mode,
         default_tmp_font=default_tmp_font,
         tmp_font_asset_map=tmp_font_asset_map,
+        use_text_components=use_text_components,
     )
     return "\n".join(lines) + "\n", stats, source_map
 
@@ -735,6 +742,7 @@ def _prefab_source_map(
     prefab_visual_mode: str,
     default_tmp_font: dict[str, Any],
     tmp_font_asset_map: dict[str, str],
+    use_text_components: bool,
 ) -> dict[str, Any]:
     source = packet.get("source") or {}
     design = packet.get("design") or {}
@@ -847,6 +855,12 @@ def _prefab_source_map(
         "design": design,
         "prefab_visual_mode": prefab_visual_mode,
         "visual_strategy": _visual_strategy_source_map(packet, prefab_visual_mode),
+        "text_restoration_policy": _text_restoration_policy(
+            use_text_components=use_text_components,
+            tmp_text_node_count=stats.get("tmp_text_node_count", 0),
+            tmp_font_asset_guid=default_tmp_font.get("guid"),
+            tmp_font_asset_map_count=len(tmp_font_asset_map),
+        ),
         "prefab_asset_path": prefab_asset_path,
         "sprite_asset_dir": sprite_asset_dir,
         "stats": stats,
@@ -882,6 +896,9 @@ def _prefab_source_map(
             sprite_asset_dir=sprite_asset_dir,
             stats=stats,
             prefab_visual_mode=prefab_visual_mode,
+            use_text_components=use_text_components,
+            tmp_font_asset_guid=default_tmp_font.get("guid"),
+            tmp_font_asset_map_count=len(tmp_font_asset_map),
         ),
         "update_policy_hint": _update_policy_hint(),
         "incremental_update_plan": _incremental_update_plan(packet, stats),
@@ -1099,18 +1116,48 @@ def _visual_strategy_source_map(packet: dict[str, Any], prefab_visual_mode: str)
     }
 
 
+def _text_restoration_policy(
+    use_text_components: bool,
+    tmp_text_node_count: int,
+    tmp_font_asset_guid: str | None,
+    tmp_font_asset_map_count: int,
+) -> dict[str, Any]:
+    missing_tmp_font = bool(use_text_components and tmp_text_node_count and not tmp_font_asset_guid and not tmp_font_asset_map_count)
+    return {
+        "mode": "editable_first" if use_text_components else "rasterized_text_explicit_override",
+        "default_mode": "editable_first",
+        "use_text_components": use_text_components,
+        "text_component": "TextMeshProUGUI",
+        "auto_rasterize_on_missing_tmp_font": False,
+        "missing_tmp_font_feedback": "warnings_and_readiness_report",
+        "tmp_text_node_count": tmp_text_node_count,
+        "tmp_font_asset_guid_resolved": bool(tmp_font_asset_guid),
+        "tmp_font_asset_map_count": tmp_font_asset_map_count,
+        "requires_user_font_mapping": missing_tmp_font,
+    }
+
+
 def _unity_import_manifest(
     design: dict[str, Any],
     prefab_asset_path: str,
     sprite_asset_dir: str,
     stats: dict[str, int],
     prefab_visual_mode: str,
+    use_text_components: bool,
+    tmp_font_asset_guid: str | None,
+    tmp_font_asset_map_count: int,
 ) -> dict[str, Any]:
     return {
         "target": "unity",
         "ui_system": "UGUI",
         "text_system": "TextMeshPro",
         "prefab_visual_mode": prefab_visual_mode,
+        "text_restoration_policy": _text_restoration_policy(
+            use_text_components=use_text_components,
+            tmp_text_node_count=stats.get("tmp_text_node_count", 0),
+            tmp_font_asset_guid=tmp_font_asset_guid,
+            tmp_font_asset_map_count=tmp_font_asset_map_count,
+        ),
         "prefab_asset_path": prefab_asset_path,
         "sprite_asset_dir": sprite_asset_dir,
         "view_root": {
@@ -1888,6 +1935,19 @@ def _should_add_slider_component(node: dict[str, Any], add_slider_components: bo
     return True
 
 
+def _should_add_scroll_rect_component(node: dict[str, Any], add_scroll_components: bool) -> bool:
+    if not add_scroll_components:
+        return False
+    if node.get("semantic_type") != "scroll_area_candidate":
+        return False
+    hint = node.get("unity_scroll_hint")
+    if not isinstance(hint, dict):
+        return False
+    if hint.get("can_add_scroll_rect") is False:
+        return False
+    return bool(hint.get("content_node_id"))
+
+
 def _should_add_scrollbar_component(node: dict[str, Any], add_scroll_components: bool) -> bool:
     if not add_scroll_components:
         return False
@@ -2541,7 +2601,7 @@ def _resolve_tmp_font(project_root: Path, explicit_guid: str | None) -> dict[str
             guid = _read_meta_guid(meta_path)
             if guid:
                 return {"guid": guid, "material_file_id": _tmp_font_material_file_id(meta_path)}
-    return {"guid": DEFAULT_TMP_FONT_ASSET_GUID, "material_file_id": None}
+    return {}
 
 
 def _normalize_tmp_font_asset_map(value: dict[str, str] | str | None) -> dict[str, str]:
